@@ -189,7 +189,7 @@ class MainActivity : Activity() {
         val wrap = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         wrap.addView(TextView(this).apply { text = label; textSize = 13f; setTextColor(ink); typeface = Typeface.DEFAULT_BOLD; setPadding(0, dp(7), 0, dp(3)) })
         if (key == "gender" || key == "idType") {
-            val choices = if (key == "gender") listOf("Select gender", "Male", "Female", "Transgender") else listOf("Select photo ID proof", "Aadhaar Card", "Aadhar Card", "Passport")
+            val choices = if (key == "gender") listOf("Select gender", "Male", "Female", "Transgender") else listOf("Select photo ID proof", "Aadhaar Card", "Aadhar Card", "Passport", "Driving Licence", "Driving License", "Voter ID", "PAN Card", "National ID")
             val stored = EditText(this).apply { setText(value); visibility = View.GONE; importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO }
             bucket[key] = stored
             val spinner = Spinner(this).apply { setPadding(dp(10), 0, dp(10), 0); importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO }
