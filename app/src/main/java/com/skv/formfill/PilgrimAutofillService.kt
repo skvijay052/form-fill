@@ -12,6 +12,13 @@ import android.widget.RemoteViews
 import android.os.CancellationSignal
 
 class PilgrimAutofillService : AutofillService() {
+    private data class Target(
+        val id: AutofillId,
+        val field: String,
+        val autofillType: Int,
+        val options: List<String>
+    )
+
     override fun onFillRequest(request: FillRequest, cancellationSignal: CancellationSignal, callback: FillCallback) {
         if (cancellationSignal.isCanceled) {
             callback.onSuccess(null)
@@ -19,7 +26,7 @@ class PilgrimAutofillService : AutofillService() {
         }
         val pilgrims = SecureProfileStore.loadPilgrims(this)
         val general = SecureProfileStore.loadGeneral(this).values()
-        val targets = mutableListOf<Pair<AutofillId, String>>()
+        val targets = mutableListOf<Target>()
         request.fillContexts.forEach { context ->
             val structure = context.structure
             for (i in 0 until structure.windowNodeCount) walk(structure.getWindowNodeAt(i).rootViewNode, targets)
@@ -29,7 +36,7 @@ class PilgrimAutofillService : AutofillService() {
             return
         }
         val builder = FillResponse.Builder()
-        var count = 0
+        var datasetCount = 0
         pilgrims.forEachIndexed { index, pilgrim ->
             val values = pilgrim.values() + general
             val presentation = RemoteViews(packageName, android.R.layout.simple_list_item_1).apply {
@@ -37,27 +44,61 @@ class PilgrimAutofillService : AutofillService() {
             }
             val dataset = Dataset.Builder(presentation)
             var matched = 0
-            targets.forEach { (id, field) ->
-                val value = values[field]
+            targets.forEach { target ->
+                val value = values[target.field]
                 if (!value.isNullOrBlank()) {
-                    dataset.setValue(id, AutofillValue.forText(value), presentation)
-                    matched++
+                    if (target.autofillType == android.view.View.AUTOFILL_TYPE_LIST) {
+                        val selectedIndex = findOptionIndex(target.field, value, target.options)
+                        if (selectedIndex >= 0) {
+                            dataset.setValue(target.id, AutofillValue.forList(selectedIndex), presentation)
+                            matched++
+                        }
+                    } else if (target.autofillType == android.view.View.AUTOFILL_TYPE_TEXT) {
+                        dataset.setValue(target.id, AutofillValue.forText(value), presentation)
+                        matched++
+                    }
                 }
             }
             if (matched > 0) {
                 builder.addDataset(dataset.build())
-                count++
+                datasetCount++
             }
         }
-        if (count == 0) callback.onSuccess(null)
+        if (datasetCount == 0) callback.onSuccess(null)
         else callback.onSuccess(builder.build())
     }
 
-    private fun walk(node: AssistStructure.ViewNode, output: MutableList<Pair<AutofillId, String>>) {
+    private fun findOptionIndex(field: String, value: String, options: List<String>): Int {
+        val normalizedValue = normalize(value)
+        val aliases = when (field) {
+            "gender" -> when (normalizedValue) {
+                "m", "male", "man" -> setOf("male", "m")
+                "f", "female", "woman" -> setOf("female", "f")
+                "transgender", "trans" -> setOf("transgender", "trans")
+                else -> setOf(normalizedValue)
+            }
+            "idType" -> when {
+                normalizedValue.contains("aadhaar") || normalizedValue.contains("aadhar") -> setOf("aadhaar card", "aadhar card", "aadhaar", "aadhar")
+                normalizedValue.contains("passport") -> setOf("passport")
+                else -> setOf(normalizedValue)
+            }
+            else -> setOf(normalizedValue)
+        }
+        return options.indexOfFirst { normalize(it) in aliases }
+    }
+
+    private fun normalize(value: String): String =
+        value.lowercase().trim().replace(Regex("[^a-z0-9]"), "")
+
+    private fun walk(node: AssistStructure.ViewNode, output: MutableList<Target>) {
         val id = node.autofillId
-        if (id != null && node.isEnabled && node.autofillType == android.view.View.AUTOFILL_TYPE_TEXT) {
+        val type = node.autofillType
+        if (id != null && node.isEnabled &&
+            (type == android.view.View.AUTOFILL_TYPE_TEXT || type == android.view.View.AUTOFILL_TYPE_LIST)) {
             val field = identify(node)
-            if (field != null && output.none { it.first == id }) output.add(id to field)
+            if (field != null && output.none { it.id == id }) {
+                output.add(Target(id, field, type, node.autofillOptions?.map { it.toString() } ?: emptyList()))
+            }
         }
         for (i in 0 until node.childCount) walk(node.getChildAt(i), output)
     }
@@ -77,7 +118,14 @@ class PilgrimAutofillService : AutofillService() {
         if (has("address-level1", "state", "region")) return "state"
         val text = listOfNotNull(node.hint, node.idEntry, node.htmlInfo?.attributes?.joinToString(" ") { it.first + "=" + it.second })
             .joinToString(" ").lowercase()
+        val optionsText = node.autofillOptions?.joinToString(" ") { it.toString() }?.lowercase().orEmpty()
+        val combined = "$text $optionsText"
         return when {
+            listOf("photo id proof", "id proof", "identity proof", "document type", "identity document").any { text.contains(it) } -> "idType"
+            listOf("photo id number", "id number", "id card number", "document number", "identity number").any { text.contains(it) } -> "idNumber"
+            listOf("gender", "sex").any { Regex("(^|[^a-z])(gender|sex)([^a-z]|$)").containsMatchIn(text) } ||
+                (node.autofillType == android.view.View.AUTOFILL_TYPE_LIST &&
+                    listOf("male", "female", "transgender").all { combined.contains(it) }) -> "gender"
             listOf("full name", "pilgrim name", "passenger name", "applicant name").any { text.contains(it) } -> "fullName"
             listOf("mobile number", "phone number", "contact number").any { text.contains(it) } -> "mobile"
             listOf("email address", "e-mail").any { text.contains(it) } -> "email"
@@ -88,7 +136,6 @@ class PilgrimAutofillService : AutofillService() {
             Regex("(^|[^a-z])state([^a-z]|$)").containsMatchIn(text) -> "state"
             Regex("(^|[^a-z])address([^a-z]|$)").containsMatchIn(text) -> "address"
             Regex("(^|[^a-z])age([^a-z]|$)").containsMatchIn(text) -> "age"
-            Regex("(^|[^a-z])(gender|sex)([^a-z]|$)").containsMatchIn(text) -> "gender"
             listOf("photo id proof", "id proof", "identity proof", "document type").any { text.contains(it) } -> "idType"
             listOf("id number", "photo id number", "id card number", "document number").any { text.contains(it) } -> "idNumber"
             else -> null
