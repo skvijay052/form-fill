@@ -5,7 +5,7 @@ import android.app.AlertDialog
 import android.content.Intent
 import android.os.Bundle
 import android.view.ViewGroup
-import android.view.inputmethod.AutofillManager
+import android.view.autofill.AutofillManager
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -43,7 +43,7 @@ class MainActivity : Activity() {
         labels.forEach { (key, label) ->
             content.addView(TextView(this).apply { text = label; textSize = 14f })
             val input = EditText(this).apply {
-                singleLine = true
+                setSingleLine(true)
                 setText(profile.values()[key].orEmpty())
                 hint = label
                 importantForAutofill = android.view.View.IMPORTANT_FOR_AUTOFILL_YES
