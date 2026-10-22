@@ -15,6 +15,8 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Spinner
+import android.widget.ArrayAdapter
 import android.widget.Toast
 
 class MainActivity : Activity() {
@@ -26,6 +28,8 @@ class MainActivity : Activity() {
     private val page = Color.rgb(247, 248, 251)
     private lateinit var content: LinearLayout
     private lateinit var pilgrimsContainer: LinearLayout
+    private lateinit var countSpinner: Spinner
+    private var updatingCount = false
 
     private val pilgrimFields = linkedMapOf("fullName" to "Name", "age" to "Age", "gender" to "Gender",
         "idType" to "Photo ID Proof", "idNumber" to "Photo ID Number")
@@ -56,16 +60,37 @@ class MainActivity : Activity() {
         val savedPilgrims = SecureProfileStore.loadPilgrims(this)
         val savedGeneral = SecureProfileStore.loadGeneral(this)
         pilgrimsContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val countCard = card()
+        countCard.addView(TextView(this).apply { text = "Number of pilgrims"; textSize = 18f; setTextColor(ink); typeface = Typeface.DEFAULT_BOLD })
+        countCard.addView(TextView(this).apply { text = "Choose 2, 4, 6 or 8 people for this booking."; textSize = 13f; setTextColor(muted); setPadding(0, dp(4), 0, dp(8)) })
+        countSpinner = Spinner(this)
+        val countAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, listOf("2 pilgrims", "4 pilgrims", "6 pilgrims", "8 pilgrims"))
+        countAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        countSpinner.adapter = countAdapter
+        countCard.addView(countSpinner, LinearLayout.LayoutParams(-1, dp(52)))
+        content.addView(countCard, params(14))
         content.addView(pilgrimsContainer)
-        savedPilgrims.forEach { addPilgrim(it) }
-        if (savedPilgrims.isEmpty()) addPilgrim(PilgrimProfile())
-
-        val addButton = Button(this).apply {
-            text = "+ Add another pilgrim"; isAllCaps = false; textSize = 15f; setTextColor(purple)
-            background = rounded(Color.WHITE, 14, Color.rgb(220,210,235))
-            setOnClickListener { addPilgrim(PilgrimProfile()); Toast.makeText(this@MainActivity, "Pilgrim added", Toast.LENGTH_SHORT).show() }
+        val count = listOf(2, 4, 6, 8).firstOrNull { it >= savedPilgrims.size.coerceAtLeast(2) } ?: 8
+        updatePilgrimCount(count, savedPilgrims)
+        countSpinner.setSelection(listOf(2, 4, 6, 8).indexOf(count), false)
+        countSpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
+                if (updatingCount) return
+                val requested = listOf(2, 4, 6, 8)[position]
+                if (requested < pilgrimInputs.size) {
+                    AlertDialog.Builder(this@MainActivity).setTitle("Reduce pilgrim count?")
+                        .setMessage("Extra pilgrim cards will be removed from this screen. Save only after checking the remaining details.")
+                        .setNegativeButton("Cancel") { _, _ ->
+                            updatingCount = true
+                            countSpinner.setSelection(listOf(2, 4, 6, 8).indexOf(listOf(2, 4, 6, 8).first { it >= pilgrimInputs.size }))
+                            updatingCount = false
+                        }
+                        .setPositiveButton("Continue") { _, _ -> updatePilgrimCount(requested, emptyList()) }
+                        .show()
+                } else updatePilgrimCount(requested, emptyList())
+            }
         }
-        content.addView(addButton, params(16))
 
         val generalCard = card()
         generalCard.addView(TextView(this).apply { text = "General details"; textSize = 19f; setTextColor(ink); typeface = Typeface.DEFAULT_BOLD })
@@ -78,7 +103,7 @@ class MainActivity : Activity() {
             background = rounded(purple, 14); setPadding(dp(12), dp(5), dp(12), dp(5))
             setOnClickListener {
                 val pilgrims = pilgrimInputs.map { map ->
-                    val v = map.mapValues { it.value.text.toString().trim() }
+                    val v = map.filterKeys { it != "__section" }.mapValues { it.value.text.toString().trim() }
                     PilgrimProfile(fullName=v["fullName"].orEmpty(), age=v["age"].orEmpty(), gender=v["gender"].orEmpty(),
                         idType=v["idType"].orEmpty(), idNumber=v["idNumber"].orEmpty())
                 }
@@ -124,30 +149,30 @@ class MainActivity : Activity() {
         setContentView(root)
     }
 
+    private fun updatePilgrimCount(count: Int, saved: List<PilgrimProfile>) {
+        while (pilgrimInputs.size < count) {
+            val index = pilgrimInputs.size
+            addPilgrim(saved.getOrNull(index) ?: PilgrimProfile())
+        }
+        while (pilgrimInputs.size > count) {
+            val removed = pilgrimInputs.removeAt(pilgrimInputs.lastIndex)
+            val section = removed["__section"]?.tag as? View
+            if (section != null) pilgrimsContainer.removeView(section)
+        }
+        refreshPilgrimTitles()
+    }
+
     private fun addPilgrim(profile: PilgrimProfile) {
-        val index = pilgrimInputs.size + 1
         val inputs = linkedMapOf<String, EditText>()
         pilgrimInputs.add(inputs)
         val section = card()
+        inputs["__section"] = EditText(this).apply { tag = section; visibility = View.GONE }
         val header = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL }
         header.addView(TextView(this).apply {
-            text = "Pilgrim $index"; textSize = 18f; setTextColor(ink); typeface = Typeface.DEFAULT_BOLD
+            text = "Pilgrim ${pilgrimInputs.size}"; textSize = 18f; setTextColor(ink); typeface = Typeface.DEFAULT_BOLD
         }, LinearLayout.LayoutParams(0, -2, 1f))
-        if (pilgrimInputs.size > 1) header.addView(TextView(this).apply {
-            text = "Remove"; textSize = 13f; setTextColor(Color.rgb(176, 55, 65)); setPadding(dp(8), dp(6), dp(4), dp(6))
-            setOnClickListener {
-                AlertDialog.Builder(this@MainActivity).setMessage("Remove Pilgrim $index?")
-                    .setNegativeButton("Cancel", null).setPositiveButton("Remove") { _, _ ->
-                        val at = pilgrimInputs.indexOf(inputs)
-                        if (at >= 0) pilgrimInputs.removeAt(at)
-                        pilgrimsContainer.removeView(section)
-                        refreshPilgrimTitles()
-                    }.show()
-            }
-        })
         section.addView(header)
-        section.addView(TextView(this).apply { text = "Required details for this person"; textSize = 13f; setTextColor(muted); setPadding(0, dp(3), 0, dp(8)) })
-        profile.values()
+        section.addView(TextView(this).apply { text = "Enter this person's details"; textSize = 13f; setTextColor(muted); setPadding(0, dp(3), 0, dp(8)) })
         pilgrimFields.forEach { (key, label) -> section.addView(makeField(key, label, profile.values()[key].orEmpty(), inputs)) }
         pilgrimsContainer.addView(section, params(14))
     }
