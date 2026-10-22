@@ -78,7 +78,7 @@ class PilgrimAutofillService : AutofillService() {
                 else -> setOf(normalizedValue)
             }
             "idType" -> when {
-                normalizedValue.contains("aadhaar") || normalizedValue.contains("aadhar") -> setOf("aadhaar card", "aadhar card", "aadhaar", "aadhar")
+                normalizedValue.contains("aadhaar") || normalizedValue.contains("aadhar") -> setOf("aadhaarcard", "aadharcard", "aadhaar", "aadhar")
                 normalizedValue.contains("passport") -> setOf("passport")
                 else -> setOf(normalizedValue)
             }
