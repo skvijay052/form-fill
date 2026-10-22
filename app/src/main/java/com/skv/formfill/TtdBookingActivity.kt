@@ -192,13 +192,20 @@ class TtdBookingActivity : Activity() {
                 if (!value) continue;
                 const candidates = [...document.querySelectorAll('input:not([type=hidden]), textarea, select, [role=combobox], [aria-haspopup=listbox]')].filter(visible);
                 // Prefer the exact TTD field name before broad label/parent-text matching.
+                // Support both TTD booking flows: SPAT uses fname/photoIdType/idProofNumber,
+                // while Arjitha Seva uses name/idType/idNumber and may repeat pilgrim rows.
                 const exactNames = key === 'gender' ? ['gender'] :
-                                   key === 'idType' ? ['photoIdType','photoidtype'] :
-                                   key === 'fullName' ? ['fname'] :
-                                   key === 'idNumber' ? ['idProofNumber'] :
-                                   key === 'age' ? ['age'] : [];
-                const target = candidates.find(el => exactNames.some(n => norm(el.getAttribute('name')) === norm(n))) ||
-                  candidates.find(el => {
+                                   key === 'idType' ? ['photoIdType','idType'] :
+                                   key === 'fullName' ? ['fname','name'] :
+                                   key === 'idNumber' ? ['idProofNumber','idNumber'] :
+                                   key === 'age' ? ['age'] :
+                                   key === 'email' ? ['pilgrimEmail','email'] :
+                                   key === 'city' ? ['pilgrimCity','city'] :
+                                   key === 'state' ? ['pilgrimState','state'] :
+                                   key === 'country' ? ['pilgrimCountry','country'] :
+                                   key === 'postalCode' ? ['pilgrimPincode','pincode','postalCode'] : [];
+                const exactMatches = candidates.filter(el => exactNames.some(n => norm(el.getAttribute('name')) === norm(n)));
+                const target = exactMatches[0] || candidates.find(el => {
                     const t = labelText(el);
                     return aliases.some(a => t.includes(norm(a)));
                   });
