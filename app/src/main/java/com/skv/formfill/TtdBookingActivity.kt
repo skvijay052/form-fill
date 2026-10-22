@@ -191,22 +191,58 @@ class TtdBookingActivity : Activity() {
                 const value = data[key];
                 if (!value) continue;
                 const candidates = [...document.querySelectorAll('input:not([type=hidden]), textarea, select, [role=combobox], [aria-haspopup=listbox]')].filter(visible);
-                const target = candidates.find(el => {
-                  const t = labelText(el);
-                  return aliases.some(a => t.includes(norm(a)));
-                });
+                // Prefer the exact TTD field name before broad label/parent-text matching.
+                const exactNames = key === 'gender' ? ['gender'] :
+                                   key === 'idType' ? ['photoIdType','photoidtype'] :
+                                   key === 'fullName' ? ['fname'] :
+                                   key === 'idNumber' ? ['idProofNumber'] :
+                                   key === 'age' ? ['age'] : [];
+                const target = candidates.find(el => exactNames.some(n => norm(el.getAttribute('name')) === norm(n))) ||
+                  candidates.find(el => {
+                    const t = labelText(el);
+                    return aliases.some(a => t.includes(norm(a)));
+                  });
                 if (!target) continue;
                 if (target instanceof HTMLSelectElement) {
                   const opts = [...target.options];
                   const match = opts.find(o => norm(o.textContent).includes(norm(value)) || norm(o.value) === norm(value));
                   if (match) { target.value = match.value; target.dispatchEvent(new Event('input',{bubbles:true})); target.dispatchEvent(new Event('change',{bubbles:true})); filled++; }
+                } else if ((key === 'gender' || key === 'idType') && target.matches('input')) {
+                  // TTD renders these dropdowns as input controls. Do not type into them:
+                  // open the control and select the matching visible option from its popup.
+                  target.click();
+                  target.focus();
+                  const desired = key === 'idType' && ['aadhaar','aadhaarcard'].includes(norm(value))
+                    ? ['aadhaarcard','aadhaar'] : key === 'idType' && norm(value).includes('passport')
+                    ? ['passport'] : [norm(value)];
+                  let option = null;
+                  for (let attempt = 0; attempt < 10 && !option; attempt++) {
+                    await new Promise(r => setTimeout(r, 180));
+                    const options = [...document.querySelectorAll(
+                      '[role=option], [role=menuitem], [role=listbox] *, [data-value], li, [class*="option"], [class*="Option"]'
+                    )].filter(visible);
+                    option = options.find(el => {
+                      const text = norm(el.innerText || el.textContent || el.getAttribute('aria-label') || '');
+                      const own = norm(el.getAttribute('data-value') || el.getAttribute('value') || '');
+                      return (desired.includes(text) || desired.includes(own)) &&
+                        ![...el.children].some(child => norm(child.innerText || child.textContent) === text);
+                    });
+                  }
+                  if (option) {
+                    option.click();
+                    target.dispatchEvent(new Event('change', {bubbles:true}));
+                    filled++;
+                  }
                 } else if (target.matches('input,textarea')) {
                   if (setValue(target, value)) filled++;
+                } else if (target instanceof HTMLSelectElement) {
+                  const opts = [...target.options];
+                  const match = opts.find(o => norm(o.textContent).includes(norm(value)) || norm(o.value) === norm(value));
+                  if (match) { target.value = match.value; target.dispatchEvent(new Event('input',{bubbles:true})); target.dispatchEvent(new Event('change',{bubbles:true})); filled++; }
                 } else {
                   target.click();
-                  await new Promise(r => setTimeout(r, 250));
-                  const optionText = key === 'gender' ? value :
-                    key === 'idType' && norm(value) === 'aadhaarcard' ? 'Aadhaar Card' : value;
+                  await new Promise(r => setTimeout(r, 350));
+                  const optionText = key === 'idType' && norm(value).includes('aadhaar') ? 'Aadhaar Card' : value;
                   const options = [...document.querySelectorAll('[role=option], [role=menuitem], li, button, [data-value]')].filter(visible);
                   const option = options.find(el => norm(el.innerText || el.textContent) === norm(optionText));
                   if (option) { option.click(); filled++; }
