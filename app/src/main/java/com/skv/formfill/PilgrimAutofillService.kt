@@ -192,10 +192,25 @@ class PilgrimAutofillService : AutofillService() {
 
         // Specific labels first, so a generic "name" hint cannot turn every field into a name.
         return when {
-            listOf("photo id number", "photo id no", "id proof number", "id proof no", "proof id number", "id number", "id card number", "document number", "identity number").any { text.contains(it) } ||
-                listOf("photoidnumber", "photoidno", "idproofnumber", "idproofno", "proofidnumber", "idnumber", "idcardnumber", "documentnumber", "identitynumber").any { compactText.contains(it) } -> "idNumber"
-            listOf("photo id proof", "id proof", "identity proof", "document type", "identity document").any { text.contains(it) } ||
-                listOf("photoidproof", "photoidtype", "idproof", "idprooftype", "idtype", "identityproof", "identitytype", "documenttype", "identitydocument").any { compactText.contains(it) } -> "idType"
+            // ID-number field names seen across HTML forms, Android hints and booking portals.
+            listOf("photo id number", "photo id no", "photo id card no", "id proof number", "id proof no",
+                "proof id number", "id number", "id no", "id card number", "document number",
+                "identity number", "identification number", "document id", "aadhaar number",
+                "aadhar number", "passport number", "pan number", "voter id number", "license number",
+                "licence number").any { text.contains(it) } ||
+                listOf("photoidnumber", "photoidno", "photoidcardno", "idproofnumber", "idproofno",
+                    "proofidnumber", "idnumber", "idno", "idcardnumber", "documentnumber",
+                    "identitynumber", "identificationnumber", "documentid", "aadhaarnumber",
+                    "aadharnumber", "aadharnumber", "passportnumber", "pannumber", "voteridnumber",
+                    "licensenumber", "licencenumber").any { compactText.contains(it) } -> "idNumber"
+            // ID-proof/type field labels and common developer-assigned IDs.
+            listOf("photo id proof", "photo id type", "id proof", "id proof type", "identity proof",
+                "identity type", "document type", "identity document", "id document", "proof type",
+                "photo identity", "type of id", "type of document").any { text.contains(it) } ||
+                listOf("photoidproof", "photoidtype", "photoidprooftype", "idproof", "idprooftype",
+                    "idproofkind", "idproofname", "idtype", "identityproof", "identitytype",
+                    "identitydocumenttype", "documenttype", "documentproof", "identitydocument",
+                    "iddocument", "prooftype", "typeofid", "typeofdocument", "photoidentity").any { compactText.contains(it) } -> "idType"
             containsLabel("email", "e-mail") || text.contains("email address") -> "email"
             containsLabel("mobile", "phone", "telephone", "contact number") || text.contains("mobile number") || text.contains("phone number") -> "mobile"
             containsLabel("date of birth", "dob", "birth date") || text.contains("date-of-birth") -> "dateOfBirth"
@@ -205,7 +220,10 @@ class PilgrimAutofillService : AutofillService() {
             containsLabel("state", "region") -> "state"
             containsLabel("address", "street address", "address line") -> "address"
             containsLabel("age") -> "age"
-            containsLabel("gender", "sex") || compactText.contains("gender") || compactText == "sex" ||
+            // Gender fields may be called gender, sex, personGender or genderCode in the page markup.
+            containsLabel("gender", "sex") ||
+                listOf("gender", "sex", "persongender", "gendercode", "genderid", "gendername",
+                    "selectgender", "applicantgender", "pilgrimgender", "passengergender").any { compactText.contains(it) } ||
                 (listOf("male", "female").all { combined.contains(it) } && hasOptions("male", "female")) -> "gender"
             containsLabel("photo id proof", "id proof", "identity proof", "document type", "identity document") ||
                 (hasOptions("aadhaar", "aadhar", "passport", "driving licence", "driving license", "voter id", "pan card", "national id") && !text.contains("number")) -> "idType"
@@ -226,11 +244,17 @@ class PilgrimAutofillService : AutofillService() {
                     hints.any { it in setOf("addresscountry", "country", "countryname") } -> "country"
                     hints.any { it in setOf("age") } -> "age"
                     hints.any { it in setOf("gender", "sex") } -> "gender"
-                    // Some booking forms expose the ID fields only through autocomplete hints.
-                    hints.any { it in setOf("photoidnumber", "photoidno", "idnumber", "idproofnumber", "idproofno", "identitynumber", "documentnumber") } -> "idNumber"
-                    hints.any { it in setOf("photoidproof", "idproof", "identityproof", "documenttype", "identitydocument") } -> "idType"
-                    // Recognize common browser/HTML autocomplete aliases for identity fields.
-                    hints.any { it in setOf("identitydocumentnumber", "documentid", "idcardnumber") } -> "idNumber"
+                    // Try multiple possible HTML autocomplete/hint spellings for these three fields.
+                    hints.any { it in setOf("gender", "sex", "persongender", "gendercode", "genderid", "gendername",
+                        "selectgender", "applicantgender", "pilgrimgender", "passengergender") } -> "gender"
+                    hints.any { it in setOf("photoidnumber", "photoidno", "photoidcardno", "idnumber", "idno",
+                        "idproofnumber", "idproofno", "identitynumber", "identificationnumber", "documentnumber",
+                        "identitydocumentnumber", "documentid", "idcardnumber", "aadhaarnumber", "aadharnumber",
+                        "passportnumber", "pannumber", "voteridnumber", "licensenumber", "licencenumber") } -> "idNumber"
+                    hints.any { it in setOf("photoidproof", "photoidtype", "photoidprooftype", "idproof",
+                        "idprooftype", "idproofkind", "idproofname", "idtype", "identityproof", "identitytype",
+                        "identitydocumenttype", "documenttype", "documentproof", "identitydocument",
+                        "iddocument", "prooftype", "typeofid", "typeofdocument", "photoidentity") } -> "idType"
                     // Never map a generic "name" hint to fullName: some websites
                     // incorrectly expose it on every input, which fills Vijay into all fields.
                     // Name is mapped only when the field's own label/ID explicitly identifies it.
