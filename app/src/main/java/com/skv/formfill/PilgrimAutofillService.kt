@@ -180,8 +180,8 @@ class PilgrimAutofillService : AutofillService() {
 
         // Specific labels first, so a generic "name" hint cannot turn every field into a name.
         return when {
-            listOf("photo id proof", "id proof", "identity proof", "document type", "identity document").any { text.contains(it) } -> "idType"
             listOf("photo id number", "photo id no", "id proof number", "id proof no", "proof id number", "id number", "id card number", "document number", "identity number").any { text.contains(it) } -> "idNumber"
+            listOf("photo id proof", "id proof", "identity proof", "document type", "identity document").any { text.contains(it) } -> "idType"
             containsLabel("email", "e-mail") || text.contains("email address") -> "email"
             containsLabel("mobile", "phone", "telephone", "contact number") || text.contains("mobile number") || text.contains("phone number") -> "mobile"
             containsLabel("date of birth", "dob", "birth date") || text.contains("date-of-birth") -> "dateOfBirth"
