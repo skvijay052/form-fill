@@ -208,32 +208,43 @@ class TtdBookingActivity : Activity() {
                 return true;
               };
               const sleep = ms => new Promise(r => setTimeout(r, ms));
+              const tapLikeUser = el => {
+                if (!el) return;
+                const opts = { bubbles: true, cancelable: true, view: window };
+                try { el.dispatchEvent(new PointerEvent('pointerdown', {...opts, pointerType:'touch', isPrimary:true})); } catch (_) {}
+                el.dispatchEvent(new MouseEvent('mousedown', opts));
+                try { el.dispatchEvent(new PointerEvent('pointerup', {...opts, pointerType:'touch', isPrimary:true})); } catch (_) {}
+                el.dispatchEvent(new MouseEvent('mouseup', opts));
+                el.dispatchEvent(new MouseEvent('click', opts));
+              };
               const chooseCustom = async (input, value, kind) => {
                 if (!input || !value) return false;
                 if (norm(input.value) === norm(value)) return true;
-                input.click();
-                await sleep(300);
+                // TTD's custom dropdown opens from pointer/mouse handlers, not always
+                // from HTMLElement.click() called by injected JavaScript.
+                input.focus();
+                tapLikeUser(input);
+                await sleep(350);
                 const wanted = kind === 'idType' && norm(value).includes('aadhaar')
                   ? ['aadhaarcard','aadhaar','aadharcard','aadhar']
                   : [norm(value)];
-                // TTD uses plain LI nodes for its custom dropdowns. Match the exact
-                // visible option and prefer that specific dropdown's option list.
                 let option = null;
-                for (let attempt = 0; attempt < 8 && !option; attempt++) {
+                for (let attempt = 0; attempt < 12 && !option; attempt++) {
                   const candidates = [...document.querySelectorAll('li.floatingDropdown_listItem__tU_5x, li, [role=option]')]
                     .filter(visible)
-                    .filter(el => {
-                      const t = norm(el.innerText || el.textContent || '');
-                      return wanted.includes(t);
-                    });
-                  option = candidates.find(el => el.matches('li.floatingDropdown_listItem__tU_5x')) || candidates[0] || null;
+                    .filter(el => wanted.includes(norm(el.innerText || el.textContent || '')));
+                  // Prefer the known TTD option node and choose the last visible match,
+                  // which corresponds to the currently open popup if duplicated controls exist.
+                  option = candidates.filter(el => el.matches('li.floatingDropdown_listItem__tU_5x')).slice(-1)[0]
+                    || candidates.slice(-1)[0] || null;
                   if (!option) await sleep(150);
                 }
                 if (!option) return false;
-                option.click();
-                await sleep(180);
-                return norm(input.value) === norm(value) ||
-                  (kind === 'idType' && norm(value).includes('aadhaar') && norm(input.value).includes('aadhaar'));
+                tapLikeUser(option);
+                await sleep(250);
+                const actual = norm(input.value);
+                return actual === norm(value) ||
+                  (kind === 'idType' && norm(value).includes('aadhaar') && actual.includes('aadhaar'));
               };
               // The Arjitha Seva page repeats pilgrim fields in DOM order. Fill each
               // saved profile against the same-index controls; never copy profile 1
