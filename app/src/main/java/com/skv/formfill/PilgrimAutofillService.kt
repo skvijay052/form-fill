@@ -116,7 +116,7 @@ class PilgrimAutofillService : AutofillService() {
         if (has("address", "street-address", "address-line1")) return "address"
         if (has("address-level2", "city", "locality")) return "city"
         if (has("address-level1", "state", "region")) return "state"
-        val text = listOfNotNull(node.hint, node.idEntry, node.htmlInfo?.attributes?.joinToString(" ") { it.first + "=" + it.second })
+        val text = listOfNotNull(node.hint, node.text?.toString(), node.idEntry, node.htmlInfo?.attributes?.joinToString(" ") { it.first + "=" + it.second })
             .joinToString(" ").lowercase()
         val optionsText = node.autofillOptions?.joinToString(" ") { it.toString() }?.lowercase().orEmpty()
         val combined = "$text $optionsText"
@@ -126,9 +126,9 @@ class PilgrimAutofillService : AutofillService() {
             listOf("gender", "sex").any { Regex("(^|[^a-z])(gender|sex)([^a-z]|$)").containsMatchIn(text) } ||
                 (node.autofillType == android.view.View.AUTOFILL_TYPE_LIST &&
                     listOf("male", "female", "transgender").all { combined.contains(it) }) -> "gender"
-            listOf("full name", "pilgrim name", "passenger name", "applicant name").any { text.contains(it) } -> "fullName"
-            listOf("mobile number", "phone number", "contact number").any { text.contains(it) } -> "mobile"
-            listOf("email address", "e-mail").any { text.contains(it) } -> "email"
+            listOf("full name", "pilgrim name", "passenger name", "applicant name").any { text.contains(it) } || Regex("(^|[^a-z])(name|first name|given name)([^a-z]|$)").containsMatchIn(text) -> "fullName"
+            listOf("mobile number", "phone number", "contact number", "mobile", "phone").any { Regex("(^|[^a-z])" + Regex.escape(it) + "([^a-z]|$)").containsMatchIn(text) } -> "mobile"
+            listOf("email address", "e-mail", "email").any { text.contains(it) } -> "email"
             listOf("date of birth", "dob").any { Regex("(^|[^a-z])" + Regex.escape(it) + "([^a-z]|$)").containsMatchIn(text) } -> "dateOfBirth"
             listOf("postal code", "pin code", "pincode", "zip code").any { text.contains(it) } -> "postalCode"
             listOf("country", "country name").any { Regex("(^|[^a-z])" + Regex.escape(it) + "([^a-z]|$)").containsMatchIn(text) } -> "country"
