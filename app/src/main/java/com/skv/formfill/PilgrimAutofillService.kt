@@ -128,6 +128,13 @@ class PilgrimAutofillService : AutofillService() {
             "idType" -> when {
                 normalizedValue.contains("aadhaar") || normalizedValue.contains("aadhar") -> setOf("aadhaarcard", "aadharcard", "aadhaar", "aadhar")
                 normalizedValue.contains("passport") -> setOf("passport")
+                normalizedValue.contains("driving") || normalizedValue.contains("licence") || normalizedValue.contains("license") ->
+                    setOf("drivinglicense", "drivinglicence", "drivinglicencecard", "drivinglicensecard")
+                normalizedValue.contains("voter") || normalizedValue.contains("election") ->
+                    setOf("voterid", "voteridentitycard", "electioncard")
+                normalizedValue.contains("pan") -> setOf("pan", "pancard", "permanentaccountnumber")
+                normalizedValue.contains("national") || normalizedValue.contains("identity") ->
+                    setOf("nationalid", "identitycard", "nationalidentitycard")
                 else -> setOf(normalizedValue)
             }
             else -> setOf(normalizedValue)
