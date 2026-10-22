@@ -15,11 +15,22 @@ import android.widget.Toast
 
 class MainActivity : Activity() {
     private val fields = linkedMapOf<String, EditText>()
-    private val labels = linkedMapOf(
-        "fullName" to "Full name", "age" to "Age", "gender" to "Gender",
-        "mobile" to "Mobile number", "email" to "Email", "dateOfBirth" to "Date of birth (DD/MM/YYYY)",
-        "idType" to "ID type (optional)", "idNumber" to "ID number (optional)",
-        "address" to "Address", "city" to "City", "state" to "State", "country" to "Country", "postalCode" to "PIN / postal code"
+    private val pilgrimFields = linkedMapOf(
+        "fullName" to "Name",
+        "age" to "Age",
+        "gender" to "Gender",
+        "idType" to "Photo ID Proof",
+        "idNumber" to "Photo ID Number"
+    )
+    private val generalFields = linkedMapOf(
+        "email" to "Email Address",
+        "mobile" to "Mobile Number",
+        "city" to "City",
+        "state" to "State",
+        "country" to "Country",
+        "postalCode" to "PIN Code",
+        "address" to "Address",
+        "dateOfBirth" to "Date of Birth (DD/MM/YYYY)"
     )
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -40,17 +51,26 @@ class MainActivity : Activity() {
             setPadding(0, 8, 0, 16)
         })
         val profile = SecureProfileStore.load(this)
-        labels.forEach { (key, label) ->
-            content.addView(TextView(this).apply { text = label; textSize = 14f })
-            val input = EditText(this).apply {
-                setSingleLine(true)
-                setText(profile.values()[key].orEmpty())
-                hint = label
-                importantForAutofill = android.view.View.IMPORTANT_FOR_AUTOFILL_YES
+        fun addSection(title: String, sectionFields: Map<String, String>) {
+            content.addView(TextView(this).apply {
+                text = title
+                textSize = 20f
+                setPadding(0, 16, 0, 8)
+            })
+            sectionFields.forEach { (key, label) ->
+                content.addView(TextView(this).apply { text = label; textSize = 14f })
+                val input = EditText(this).apply {
+                    setSingleLine(true)
+                    setText(profile.values()[key].orEmpty())
+                    hint = label
+                    importantForAutofill = android.view.View.IMPORTANT_FOR_AUTOFILL_YES
+                }
+                fields[key] = input
+                content.addView(input, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             }
-            fields[key] = input
-            content.addView(input, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         }
+        addSection("Pilgrim Details", pilgrimFields)
+        addSection("General Details", generalFields)
         content.addView(Button(this).apply {
             text = "Save securely"
             setOnClickListener {
