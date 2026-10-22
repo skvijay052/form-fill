@@ -226,13 +226,19 @@ class TtdBookingActivity : Activity() {
                   for (let attempt = 0; attempt < 10 && !option; attempt++) {
                     await new Promise(r => setTimeout(r, 180));
                     const options = [...document.querySelectorAll(
-                      '[role=option], [role=menuitem], [role=listbox] *, [data-value], li, [class*="option"], [class*="Option"]'
+                      '[role=option], [role=menuitem], [role=listbox] *, [data-value], li, [class*="option"], [class*="Option"], [class*="item"], [class*="Item"], div, span'
                     )].filter(visible);
+                    // TTD sometimes renders popup choices as plain div/span elements without ARIA roles.
+                    // Match the smallest visible element with an exact option label, not just known selectors.
                     option = options.find(el => {
                       const text = norm(el.innerText || el.textContent || el.getAttribute('aria-label') || '');
                       const own = norm(el.getAttribute('data-value') || el.getAttribute('value') || '');
-                      return (desired.includes(text) || desired.includes(own)) &&
-                        ![...el.children].some(child => norm(child.innerText || child.textContent) === text);
+                      const exact = desired.includes(text) || desired.includes(own);
+                      const childHasExact = [...el.children].some(child =>
+                        desired.includes(norm(child.innerText || child.textContent || child.getAttribute('aria-label') || '')) ||
+                        desired.includes(norm(child.getAttribute('data-value') || child.getAttribute('value') || ''))
+                      );
+                      return exact && !childHasExact;
                     });
                   }
                   if (option) {
