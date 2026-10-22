@@ -17,42 +17,51 @@ class PilgrimAutofillService : AutofillService() {
             callback.onSuccess(null)
             return
         }
-        val profile = SecureProfileStore.load(this)
-        val values = profile.values()
-        if (values.isEmpty()) {
-            callback.onSuccess(null)
-            return
-        }
-        val fields = mutableListOf<Pair<AutofillId, String>>()
+        val pilgrims = SecureProfileStore.loadPilgrims(this)
+        val general = SecureProfileStore.loadGeneral(this).values()
+        val targets = mutableListOf<Pair<AutofillId, String>>()
         request.fillContexts.forEach { context ->
             val structure = context.structure
-            for (i in 0 until structure.windowNodeCount) {
-                walk(structure.getWindowNodeAt(i).rootViewNode, fields, values)
-            }
+            for (i in 0 until structure.windowNodeCount) walk(structure.getWindowNodeAt(i).rootViewNode, targets)
         }
-        if (fields.isEmpty()) {
+        if (targets.isEmpty()) {
             callback.onSuccess(null)
             return
         }
-        val presentation = RemoteViews(packageName, android.R.layout.simple_list_item_1).apply {
-            setTextViewText(android.R.id.text1, "Fill saved details")
+        val builder = FillResponse.Builder()
+        var count = 0
+        pilgrims.forEachIndexed { index, pilgrim ->
+            val values = pilgrim.values() + general
+            val presentation = RemoteViews(packageName, android.R.layout.simple_list_item_1).apply {
+                setTextViewText(android.R.id.text1, "Pilgrim ${index + 1}: ${pilgrim.fullName.ifBlank { "Saved details" }}")
+            }
+            val dataset = Dataset.Builder(presentation)
+            var matched = 0
+            targets.forEach { (id, field) ->
+                val value = values[field]
+                if (!value.isNullOrBlank()) {
+                    dataset.setValue(id, AutofillValue.forText(value), presentation)
+                    matched++
+                }
+            }
+            if (matched > 0) {
+                builder.addDataset(dataset.build())
+                count++
+            }
         }
-        val builder = Dataset.Builder(presentation)
-        fields.forEach { (id, value) -> builder.setValue(id, AutofillValue.forText(value), presentation) }
-        callback.onSuccess(FillResponse.Builder().addDataset(builder.build()).build())
+        if (count == 0) callback.onSuccess(null)
+        else callback.onSuccess(builder.build())
     }
 
-    private fun walk(node: AssistStructure.ViewNode, output: MutableList<Pair<AutofillId, String>>, values: Map<String, String>) {
+    private fun walk(node: AssistStructure.ViewNode, output: MutableList<Pair<AutofillId, String>>) {
         val id = node.autofillId
         if (id != null && node.isEnabled && node.autofillType == android.view.View.AUTOFILL_TYPE_TEXT) {
             val field = identify(node)
-            val value = field?.let { values[it] }
-            if (!value.isNullOrBlank() && output.none { it.first == id }) output.add(id to value)
+            if (field != null && output.none { it.first == id }) output.add(id to field)
         }
-        for (i in 0 until node.childCount) walk(node.getChildAt(i), output, values)
+        for (i in 0 until node.childCount) walk(node.getChildAt(i), output)
     }
 
-    /** Conservative matching: exact standard hints first, then specific aliases only. */
     private fun identify(node: AssistStructure.ViewNode): String? {
         val hints = node.autofillHints?.map { it.lowercase() } ?: emptyList()
         fun has(vararg terms: String) = hints.any { hint -> terms.any { hint == it } }
@@ -68,7 +77,6 @@ class PilgrimAutofillService : AutofillService() {
         if (has("address-level1", "state", "region")) return "state"
         val text = listOfNotNull(node.hint, node.idEntry, node.htmlInfo?.attributes?.joinToString(" ") { it.first + "=" + it.second })
             .joinToString(" ").lowercase()
-        // Do not use generic "name" substring; avoid username, account and ID fields.
         return when {
             listOf("full name", "pilgrim name", "passenger name", "applicant name").any { text.contains(it) } -> "fullName"
             listOf("mobile number", "phone number", "contact number").any { text.contains(it) } -> "mobile"
@@ -77,10 +85,10 @@ class PilgrimAutofillService : AutofillService() {
             listOf("postal code", "pin code", "pincode", "zip code").any { text.contains(it) } -> "postalCode"
             listOf("country", "country name").any { Regex("(^|[^a-z])" + Regex.escape(it) + "([^a-z]|$)").containsMatchIn(text) } -> "country"
             listOf("city", "district").any { Regex("(^|[^a-z])" + Regex.escape(it) + "([^a-z]|$)").containsMatchIn(text) } -> "city"
-            listOf("state").any { Regex("(^|[^a-z])state([^a-z]|$)").containsMatchIn(text) } -> "state"
-            listOf("address").any { Regex("(^|[^a-z])address([^a-z]|$)").containsMatchIn(text) } -> "address"
-            listOf("age").any { Regex("(^|[^a-z])age([^a-z]|$)").containsMatchIn(text) } -> "age"
-            listOf("gender", "sex").any { Regex("(^|[^a-z])(gender|sex)([^a-z]|$)").containsMatchIn(text) } -> "gender"
+            Regex("(^|[^a-z])state([^a-z]|$)").containsMatchIn(text) -> "state"
+            Regex("(^|[^a-z])address([^a-z]|$)").containsMatchIn(text) -> "address"
+            Regex("(^|[^a-z])age([^a-z]|$)").containsMatchIn(text) -> "age"
+            Regex("(^|[^a-z])(gender|sex)([^a-z]|$)").containsMatchIn(text) -> "gender"
             listOf("photo id proof", "id proof", "identity proof", "document type").any { text.contains(it) } -> "idType"
             listOf("id number", "photo id number", "id card number", "document number").any { text.contains(it) } -> "idNumber"
             else -> null
@@ -88,7 +96,6 @@ class PilgrimAutofillService : AutofillService() {
     }
 
     override fun onSaveRequest(request: android.service.autofill.SaveRequest, callback: android.service.autofill.SaveCallback) {
-        // Intentionally do not save arbitrary form values. Users edit their profile in the app.
         callback.onSuccess()
     }
 }
