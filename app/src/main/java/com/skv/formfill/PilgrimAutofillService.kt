@@ -37,36 +37,83 @@ class PilgrimAutofillService : AutofillService() {
             return
         }
         val builder = FillResponse.Builder()
-        var datasetCount = 0
-        pilgrims.forEachIndexed { index, pilgrim ->
-            val values = pilgrim.values() + general
+        val pilgrimTargets = targets.filter { it.field in setOf("fullName", "age", "gender", "idType", "idNumber") }
+        val occurrences = pilgrimTargets.groupBy { it.field }
+        val hasRepeatedPilgrimFields = occurrences.values.any { it.size >= 2 }
+
+        if (hasRepeatedPilgrimFields && pilgrims.isNotEmpty()) {
+            // When the booking page contains multiple pilgrim sections at once,
+            // fill each section from the matching saved profile by occurrence order.
             val presentation = RemoteViews(packageName, android.R.layout.simple_list_item_1).apply {
-                setTextViewText(android.R.id.text1, "Pilgrim ${index + 1}: ${pilgrim.fullName.ifBlank { "Saved details" }}")
+                setTextViewText(android.R.id.text1, "Fill all saved pilgrim and general details")
             }
             val dataset = Dataset.Builder(presentation)
             var matched = 0
             targets.forEach { target ->
-                val value = values[target.field]
-                if (!value.isNullOrBlank()) {
-                    if (target.autofillType == android.view.View.AUTOFILL_TYPE_LIST) {
-                        val selectedIndex = findOptionIndex(target.field, value, target.options)
-                        if (selectedIndex >= 0) {
-                            dataset.setValue(target.id, AutofillValue.forList(selectedIndex), presentation)
-                            matched++
-                        }
-                    } else if (target.autofillType == android.view.View.AUTOFILL_TYPE_TEXT) {
-                        dataset.setValue(target.id, AutofillValue.forText(value), presentation)
-                        matched++
-                    }
+                if (target.field in setOf("email", "mobile", "dateOfBirth", "address", "city", "state", "country", "postalCode")) {
+                    val value = general[target.field]
+                    if (!value.isNullOrBlank() && setTextValue(dataset, target, value, presentation)) matched++
                 }
             }
-            if (matched > 0) {
-                builder.addDataset(dataset.build())
-                datasetCount++
+            occurrences.forEach { (field, fieldTargets) ->
+                fieldTargets.forEachIndexed { personIndex, target ->
+                    val pilgrim = pilgrims.getOrNull(personIndex) ?: return@forEachIndexed
+                    val value = pilgrim.values()[field]
+                    if (!value.isNullOrBlank() && setTargetValue(dataset, target, value, presentation)) matched++
+                }
+            }
+            if (matched > 0) builder.addDataset(dataset.build())
+            else {
+                callback.onSuccess(null)
+                return
+            }
+        } else {
+            // If the site displays one pilgrim form at a time, offer one saved profile per dataset.
+            pilgrims.forEachIndexed { index, pilgrim ->
+                val values = pilgrim.values() + general
+                val presentation = RemoteViews(packageName, android.R.layout.simple_list_item_1).apply {
+                    setTextViewText(android.R.id.text1, "Pilgrim ${index + 1}: ${pilgrim.fullName.ifBlank { "Saved details" }}")
+                }
+                val dataset = Dataset.Builder(presentation)
+                var matched = 0
+                targets.forEach { target ->
+                    val value = values[target.field]
+                    if (!value.isNullOrBlank() && setTargetValue(dataset, target, value, presentation)) matched++
+                }
+                if (matched > 0) builder.addDataset(dataset.build())
             }
         }
-        if (datasetCount == 0) callback.onSuccess(null)
-        else callback.onSuccess(builder.build())
+        callback.onSuccess(builder.build())
+    }
+
+    private fun setTargetValue(
+        dataset: Dataset.Builder,
+        target: Target,
+        value: String,
+        presentation: RemoteViews
+    ): Boolean {
+        if (target.autofillType == android.view.View.AUTOFILL_TYPE_LIST) {
+            val selectedIndex = findOptionIndex(target.field, value, target.options)
+            if (selectedIndex < 0) return false
+            dataset.setValue(target.id, AutofillValue.forList(selectedIndex), presentation)
+            return true
+        }
+        if (target.autofillType == android.view.View.AUTOFILL_TYPE_TEXT) {
+            dataset.setValue(target.id, AutofillValue.forText(value), presentation)
+            return true
+        }
+        return false
+    }
+
+    private fun setTextValue(
+        dataset: Dataset.Builder,
+        target: Target,
+        value: String,
+        presentation: RemoteViews
+    ): Boolean {
+        if (target.autofillType != android.view.View.AUTOFILL_TYPE_TEXT) return false
+        dataset.setValue(target.id, AutofillValue.forText(value), presentation)
+        return true
     }
 
     private fun findOptionIndex(field: String, value: String, options: List<String>): Int {
