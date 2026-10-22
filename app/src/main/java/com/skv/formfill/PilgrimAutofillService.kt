@@ -118,14 +118,23 @@ class PilgrimAutofillService : AutofillService() {
         ).joinToString(" ").lowercase()
         val optionsText = node.autofillOptions?.joinToString(" ") { it.toString() }?.lowercase().orEmpty()
         val combined = "$text $optionsText"
+        val explicitNameText = listOfNotNull(
+            node.text?.toString(),
+            node.idEntry,
+            node.htmlInfo?.attributes?.joinToString(" ") { it.first + "=" + it.second }
+        ).joinToString(" ").lowercase()
+        val hintText = node.hint?.toString()?.trim()?.lowercase().orEmpty()
         fun containsLabel(vararg terms: String): Boolean = terms.any { term ->
             Regex("(^|[^a-z])" + Regex.escape(term) + "([^a-z]|$)").containsMatchIn(text)
+        }
+        fun hasOptions(vararg terms: String): Boolean = terms.any { term ->
+            Regex("(^|[^a-z])" + Regex.escape(term) + "([^a-z]|$)").containsMatchIn(optionsText)
         }
 
         // Specific labels first, so a generic "name" hint cannot turn every field into a name.
         return when {
             listOf("photo id proof", "id proof", "identity proof", "document type", "identity document").any { text.contains(it) } -> "idType"
-            listOf("photo id number", "id number", "id card number", "document number", "identity number").any { text.contains(it) } -> "idNumber"
+            listOf("photo id number", "photo id no", "id proof number", "id proof no", "proof id number", "id number", "id card number", "document number", "identity number").any { text.contains(it) } -> "idNumber"
             containsLabel("email", "e-mail") || text.contains("email address") -> "email"
             containsLabel("mobile", "phone", "telephone", "contact number") || text.contains("mobile number") || text.contains("phone number") -> "mobile"
             containsLabel("date of birth", "dob", "birth date") || text.contains("date-of-birth") -> "dateOfBirth"
@@ -136,9 +145,12 @@ class PilgrimAutofillService : AutofillService() {
             containsLabel("address", "street address", "address line") -> "address"
             containsLabel("age") -> "age"
             containsLabel("gender", "sex") ||
-                (node.autofillType == android.view.View.AUTOFILL_TYPE_LIST &&
-                    listOf("male", "female").all { combined.contains(it) }) -> "gender"
-            containsLabel("full name", "pilgrim name", "passenger name", "applicant name", "first name", "given name", "last name", "surname") -> "fullName"
+                (listOf("male", "female").all { combined.contains(it) } && hasOptions("male", "female")) -> "gender"
+            containsLabel("photo id proof", "id proof", "identity proof", "document type", "identity document") ||
+                (hasOptions("aadhaar", "aadhar", "passport") && !text.contains("number")) -> "idType"
+            containsLabel("full name", "pilgrim name", "passenger name", "applicant name", "first name", "given name", "last name", "surname") ||
+                Regex("(^|[^a-z])name([^a-z]|$)").containsMatchIn(explicitNameText) ||
+                hintText in setOf("name", "full name", "pilgrim name") -> "fullName"
             // Only use hints after checking visible metadata. Do not accept generic "name" alone.
             else -> {
                 val hints = node.autofillHints?.map { it.lowercase().replace("_", "").replace("-", "") } ?: emptyList()
