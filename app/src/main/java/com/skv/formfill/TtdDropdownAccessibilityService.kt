@@ -25,7 +25,7 @@ class TtdDropdownAccessibilityService : AccessibilityService() {
         val value: String
     )
 
-    private data class Task(val field: String, val ordinal: Int, val value: String)
+    private data class Task(val field: String, val ordinal: Int, val value: String, val top: Int)
 
     private val handler = Handler(Looper.getMainLooper())
     private val tasks = ArrayDeque<Task>()
@@ -81,15 +81,13 @@ class TtdDropdownAccessibilityService : AccessibilityService() {
                 .forEachIndexed { ordinal, target ->
                     val value = profiles.getOrNull(ordinal)?.values()?.get(field).orEmpty()
                     if (value.isNotBlank() && isPlaceholder(target.value)) {
-                        planned.add(Task(field, ordinal, value))
+                        planned.add(Task(field, ordinal, value, target.top))
                     }
                 }
         }
         if (planned.isEmpty()) return
 
-        planned.sortBy { task ->
-            found.firstOrNull { it.field == task.field && it.value.let(::isPlaceholder) }?.top ?: Int.MAX_VALUE
-        }
+        planned.sortBy { it.top }
         val signature = planned.joinToString("|") { "${it.field}:${it.ordinal}:${canonical(it.field, it.value)}" }
         val now = SystemClock.elapsedRealtime()
         if (signature == lastSignature && now - lastAttemptAt < 8000L) return
