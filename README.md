@@ -2,9 +2,16 @@
 
 A lightweight Android Autofill Service for user-controlled form filling, including supported TTD pilgrim forms.
 
-## TTD form support
+## TTD custom dropdown helper
 
-FormFill provides Android Autofill for supported fields. Some custom controls in the official TTD app, including Gender and Photo ID Proof dropdowns, may not expose standard Autofill fields and may need to be selected manually.
+Some TTD controls do not expose standard Android Autofill. FormFill includes an optional Accessibility helper that attempts to select saved Gender and Photo ID Proof values when those visible dropdowns are unselected.
+
+1. Open FormFill and save each pilgrim's Gender and Photo ID Proof values.
+2. Tap **Enable TTD dropdown helper**.
+3. In Android Accessibility settings, select **FormFill TTD Dropdown Helper** and enable it only if you are comfortable granting this access.
+4. Return to FormFill, then open the official TTD app. If a custom control is not exposed through Accessibility, select it manually.
+
+Android Accessibility is a powerful permission and may display a security warning. The helper is restricted to the official TTD package (`com.ttdapp`), attempts only the two dropdown fields, does not log or upload screen contents, and does not submit bookings. Selection is not guaranteed because TTD controls may change between app versions.
 
 ## Safety and privacy
 
