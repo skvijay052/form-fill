@@ -192,7 +192,7 @@ class MainActivity : Activity() {
             val choices = if (key == "gender") listOf("Select gender", "Male", "Female", "Transgender") else listOf("Select photo ID proof", "Aadhaar Card", "Aadhar Card", "Passport")
             val stored = EditText(this).apply { setText(value); visibility = View.GONE; importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO }
             bucket[key] = stored
-            val spinner = Spinner(this)
+            val spinner = Spinner(this).apply { setPadding(dp(10), 0, dp(10), 0); importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO }
             val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, choices)
             adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
             spinner.adapter = adapter
@@ -216,6 +216,7 @@ class MainActivity : Activity() {
             hint = when (key) { "age" -> "Enter age"; "email" -> "name@example.com"; "mobile" -> "Enter mobile number"; "postalCode" -> "Enter PIN code"; "dateOfBirth" -> "DD/MM/YYYY"; else -> "Enter $label" }
             background = rounded(Color.rgb(248,249,252), 10, Color.rgb(226,230,237))
             importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_YES
+            autofillHints = when (key) { "fullName" -> arrayOf(View.AUTOFILL_HINT_PERSON_NAME); "email" -> arrayOf(View.AUTOFILL_HINT_EMAIL_ADDRESS); "mobile" -> arrayOf(View.AUTOFILL_HINT_PHONE); "age" -> emptyArray(); "dateOfBirth" -> arrayOf(View.AUTOFILL_HINT_BIRTH_DATE); "postalCode" -> arrayOf(View.AUTOFILL_HINT_POSTAL_CODE); "address" -> arrayOf(View.AUTOFILL_HINT_POSTAL_ADDRESS); "city" -> arrayOf(View.AUTOFILL_HINT_POSTAL_ADDRESS_LOCALITY); "state" -> arrayOf(View.AUTOFILL_HINT_POSTAL_ADDRESS_REGION); "country" -> arrayOf(View.AUTOFILL_HINT_POSTAL_ADDRESS_COUNTRY); else -> emptyArray() }
             contentDescription = label
         }
         bucket[key] = input
