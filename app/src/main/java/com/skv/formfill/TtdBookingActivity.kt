@@ -41,8 +41,13 @@ class TtdBookingActivity : Activity() {
             text = "Fill saved details"; isAllCaps = false
             setOnClickListener { fillCurrentPage() }
         }
+        val inspect = Button(this).apply {
+            text = "Inspect"; isAllCaps = false
+            setOnClickListener { inspectCurrentPage() }
+        }
         bar.addView(back)
         bar.addView(fill, LinearLayout.LayoutParams(0, -2, 1f))
+        bar.addView(inspect)
         root.addView(bar)
         status = TextView(this).apply {
             text = "Opening official TTD website…"
@@ -72,6 +77,50 @@ class TtdBookingActivity : Activity() {
         }
         root.addView(web, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(root)
+    }
+
+    private fun inspectCurrentPage() {
+        val js = """
+            (function() {
+              const visible = el => !!(el && (el.offsetWidth || el.offsetHeight || el.getClientRects().length));
+              const text = el => (el.innerText || el.textContent || '').trim().replace(/\\s+/g,' ').slice(0,100);
+              const nodes = [...document.querySelectorAll('input,textarea,select,button,[role], [aria-haspopup], [data-testid]')].filter(visible);
+              return JSON.stringify({
+                url: location.href,
+                title: document.title,
+                fields: nodes.slice(0,100).map(el => ({
+                  tag: el.tagName,
+                  type: el.getAttribute('type') || '',
+                  role: el.getAttribute('role') || '',
+                  name: el.getAttribute('name') || '',
+                  id: el.id || '',
+                  ariaLabel: el.getAttribute('aria-label') || '',
+                  placeholder: el.getAttribute('placeholder') || '',
+                  ariaHaspopup: el.getAttribute('aria-haspopup') || '',
+                  text: text(el),
+                  options: el.tagName === 'SELECT' ? [...el.options].map(o => text(o)).slice(0,30) : []
+                }))
+              });
+            })()
+        """.trimIndent()
+        status.text = "Inspecting visible form controls…"
+        web.evaluateJavascript(js) { result ->
+            val decoded = try {
+                org.json.JSONTokener(result ?: "null").nextValue().toString()
+            } catch (_: Exception) {
+                result ?: "No diagnostic result"
+            }
+            android.app.AlertDialog.Builder(this)
+                .setTitle("TTD form diagnostics")
+                .setMessage(decoded.take(12000))
+                .setPositiveButton("Copy diagnostics") { _, _ ->
+                    val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                    clipboard.setPrimaryClip(android.content.ClipData.newPlainText("TTD form diagnostics", decoded))
+                    Toast.makeText(this, "Diagnostics copied. Paste them into this chat.", Toast.LENGTH_LONG).show()
+                }
+                .setNegativeButton("Close", null)
+                .show()
+        }
     }
 
     private fun fillCurrentPage() {
