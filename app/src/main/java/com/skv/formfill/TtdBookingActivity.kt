@@ -219,32 +219,47 @@ class TtdBookingActivity : Activity() {
               };
               const chooseCustom = async (input, value, kind) => {
                 if (!input || !value) return false;
-                if (norm(input.value) === norm(value)) return true;
-                // TTD's custom dropdown opens from pointer/mouse handlers, not always
-                // from HTMLElement.click() called by injected JavaScript.
-                input.focus();
-                tapLikeUser(input);
-                await sleep(350);
                 const wanted = kind === 'idType' && norm(value).includes('aadhaar')
                   ? ['aadhaarcard','aadhaar','aadharcard','aadhar']
                   : [norm(value)];
-                let option = null;
-                for (let attempt = 0; attempt < 12 && !option; attempt++) {
+                const findOption = () => {
                   const candidates = [...document.querySelectorAll('li.floatingDropdown_listItem__tU_5x, li, [role=option]')]
                     .filter(visible)
                     .filter(el => wanted.includes(norm(el.innerText || el.textContent || '')));
-                  // Prefer the known TTD option node and choose the last visible match,
-                  // which corresponds to the currently open popup if duplicated controls exist.
-                  option = candidates.filter(el => el.matches('li.floatingDropdown_listItem__tU_5x')).slice(-1)[0]
+                  return candidates.filter(el => el.matches('li.floatingDropdown_listItem__tU_5x')).slice(-1)[0]
                     || candidates.slice(-1)[0] || null;
-                  if (!option) await sleep(150);
+                };
+                const matchesValue = () => {
+                  const actual = norm(input.value);
+                  return actual === norm(value) ||
+                    (kind === 'idType' && norm(value).includes('aadhaar') && actual.includes('aadhaar'));
+                };
+                if (matchesValue()) return true;
+
+                // Reuse an already-open TTD popup first. Clicking the input when its
+                // popup is open can close it, which made the previous build miss options.
+                let option = findOption();
+                if (!option) {
+                  input.focus();
+                  tapLikeUser(input);
+                  await sleep(300);
+                }
+                for (let attempt = 0; attempt < 12; attempt++) {
+                  option = findOption();
+                  if (option) break;
+                  await sleep(150);
                 }
                 if (!option) return false;
+
                 tapLikeUser(option);
+                await sleep(350);
+                if (matchesValue()) return true;
+
+                // Some React dropdowns listen on the list item's parent/container.
+                // Try a normal click only if the first user-like tap did not update input.
+                option.click();
                 await sleep(250);
-                const actual = norm(input.value);
-                return actual === norm(value) ||
-                  (kind === 'idType' && norm(value).includes('aadhaar') && actual.includes('aadhaar'));
+                return matchesValue();
               };
               // The Arjitha Seva page repeats pilgrim fields in DOM order. Fill each
               // saved profile against the same-index controls; never copy profile 1
