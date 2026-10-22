@@ -19,7 +19,7 @@ class MainActivity : Activity() {
         "fullName" to "Full name", "age" to "Age", "gender" to "Gender",
         "mobile" to "Mobile number", "email" to "Email", "dateOfBirth" to "Date of birth (DD/MM/YYYY)",
         "idType" to "ID type (optional)", "idNumber" to "ID number (optional)",
-        "address" to "Address", "city" to "City", "state" to "State", "postalCode" to "PIN / postal code"
+        "address" to "Address", "city" to "City", "state" to "State", "country" to "Country", "postalCode" to "PIN / postal code"
     )
 
     override fun onCreate(savedInstanceState: Bundle?) {
