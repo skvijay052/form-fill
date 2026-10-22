@@ -117,6 +117,12 @@ class MainActivity : Activity() {
         }, params(10))
 
         content.addView(Button(this).apply {
+            text = "Open TTD booking in FormFill"; isAllCaps = false; textSize = 16f; setTextColor(Color.WHITE)
+            background = rounded(Color.rgb(38, 112, 78), 14); setPadding(dp(12), dp(5), dp(12), dp(5))
+            setOnClickListener { startActivity(Intent(this@MainActivity, TtdBookingActivity::class.java)) }
+        }, params(10))
+
+        content.addView(Button(this).apply {
             text = "Set FormFill as Autofill service"; isAllCaps = false; textSize = 14f; setTextColor(purple)
             background = rounded(Color.WHITE, 14, Color.rgb(220,210,235))
             setOnClickListener {
