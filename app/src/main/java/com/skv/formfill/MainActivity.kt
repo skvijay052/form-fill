@@ -127,21 +127,6 @@ class MainActivity : Activity() {
             }
         }, params(8))
 
-        content.addView(Button(this).apply {
-            text = "Enable TTD dropdown helper"; isAllCaps = false; textSize = 14f; setTextColor(purple)
-            background = rounded(Color.WHITE, 14, Color.rgb(220,210,235))
-            setOnClickListener {
-                Toast.makeText(this@MainActivity,
-                    "In Accessibility settings, enable FormFill TTD Dropdown Helper.",
-                    Toast.LENGTH_LONG).show()
-                startActivity(Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS))
-            }
-        }, params(8))
-        content.addView(TextView(this).apply {
-            text = "Optional helper for custom TTD dropdowns. Accessibility access is used only while the official TTD app is open."
-            textSize = 12f; setTextColor(muted); gravity = android.view.Gravity.CENTER
-            setPadding(dp(8), dp(4), dp(8), dp(8))
-        })
         content.addView(TextView(this).apply {
             text = "Your saved profiles are encrypted on this device. Autofill options depend on TTD form support."
             textSize = 12f; setTextColor(muted); gravity = android.view.Gravity.CENTER; setPadding(dp(8), dp(6), dp(8), dp(10))
