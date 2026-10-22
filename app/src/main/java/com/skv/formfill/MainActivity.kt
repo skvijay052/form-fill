@@ -216,7 +216,7 @@ class MainActivity : Activity() {
             hint = when (key) { "age" -> "Enter age"; "email" -> "name@example.com"; "mobile" -> "Enter mobile number"; "postalCode" -> "Enter PIN code"; "dateOfBirth" -> "DD/MM/YYYY"; else -> "Enter $label" }
             background = rounded(Color.rgb(248,249,252), 10, Color.rgb(226,230,237))
             importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_YES
-            autofillHints = when (key) { "fullName" -> arrayOf(View.AUTOFILL_HINT_PERSON_NAME); "email" -> arrayOf(View.AUTOFILL_HINT_EMAIL_ADDRESS); "mobile" -> arrayOf(View.AUTOFILL_HINT_PHONE); "age" -> emptyArray(); "dateOfBirth" -> arrayOf(View.AUTOFILL_HINT_BIRTH_DATE); "postalCode" -> arrayOf(View.AUTOFILL_HINT_POSTAL_CODE); "address" -> arrayOf(View.AUTOFILL_HINT_POSTAL_ADDRESS); "city" -> arrayOf(View.AUTOFILL_HINT_POSTAL_ADDRESS_LOCALITY); "state" -> arrayOf(View.AUTOFILL_HINT_POSTAL_ADDRESS_REGION); "country" -> arrayOf(View.AUTOFILL_HINT_POSTAL_ADDRESS_COUNTRY); else -> emptyArray() }
+            setAutofillHints(*when (key) { "fullName" -> arrayOf("name"); "email" -> arrayOf(View.AUTOFILL_HINT_EMAIL_ADDRESS); "mobile" -> arrayOf(View.AUTOFILL_HINT_PHONE); "age" -> emptyArray(); "dateOfBirth" -> arrayOf("birthDate"); "postalCode" -> arrayOf(View.AUTOFILL_HINT_POSTAL_CODE); "address" -> arrayOf(View.AUTOFILL_HINT_POSTAL_ADDRESS); "city" -> arrayOf("addressLocality"); "state" -> arrayOf("addressRegion"); "country" -> arrayOf("addressCountry"); else -> emptyArray() })
             contentDescription = label
         }
         bucket[key] = input
