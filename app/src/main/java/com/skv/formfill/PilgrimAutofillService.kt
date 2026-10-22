@@ -195,7 +195,7 @@ class PilgrimAutofillService : AutofillService() {
             listOf("photo id number", "photo id no", "id proof number", "id proof no", "proof id number", "id number", "id card number", "document number", "identity number").any { text.contains(it) } ||
                 listOf("photoidnumber", "photoidno", "idproofnumber", "idproofno", "proofidnumber", "idnumber", "idcardnumber", "documentnumber", "identitynumber").any { compactText.contains(it) } -> "idNumber"
             listOf("photo id proof", "id proof", "identity proof", "document type", "identity document").any { text.contains(it) } ||
-                listOf("photoidproof", "idproof", "identityproof", "documenttype", "identitydocument").any { compactText.contains(it) } -> "idType"
+                listOf("photoidproof", "photoidtype", "idproof", "idprooftype", "idtype", "identityproof", "identitytype", "documenttype", "identitydocument").any { compactText.contains(it) } -> "idType"
             containsLabel("email", "e-mail") || text.contains("email address") -> "email"
             containsLabel("mobile", "phone", "telephone", "contact number") || text.contains("mobile number") || text.contains("phone number") -> "mobile"
             containsLabel("date of birth", "dob", "birth date") || text.contains("date-of-birth") -> "dateOfBirth"
@@ -205,7 +205,7 @@ class PilgrimAutofillService : AutofillService() {
             containsLabel("state", "region") -> "state"
             containsLabel("address", "street address", "address line") -> "address"
             containsLabel("age") -> "age"
-            containsLabel("gender", "sex") ||
+            containsLabel("gender", "sex") || compactText.contains("gender") || compactText == "sex" ||
                 (listOf("male", "female").all { combined.contains(it) } && hasOptions("male", "female")) -> "gender"
             containsLabel("photo id proof", "id proof", "identity proof", "document type", "identity document") ||
                 (hasOptions("aadhaar", "aadhar", "passport", "driving licence", "driving license", "voter id", "pan card", "national id") && !text.contains("number")) -> "idType"
