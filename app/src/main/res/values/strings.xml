@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">FormFill Autofill</string>
+    <string name="autofill_service_name">FormFill Autofill</string>
+</resources>
