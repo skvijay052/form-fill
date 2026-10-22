@@ -115,7 +115,6 @@ class TtdBookingActivity : Activity() {
                   text: text(el),
                   outerHTML: (el.outerHTML || '').slice(0,500)
                 }))
-                }))
               });
             })()
         """.trimIndent()
