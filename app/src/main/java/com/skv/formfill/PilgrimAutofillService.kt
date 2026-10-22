@@ -61,6 +61,8 @@ class PilgrimAutofillService : AutofillService() {
         if (has("phone", "phonenumber", "phone-number", "tel")) return "mobile"
         if (has("birthdate", "bday", "dateofbirth", "date-of-birth")) return "dateOfBirth"
         if (has("postalcode", "postal-code", "zip", "zip-code")) return "postalCode"
+        if (has("country", "country-name", "countryname")) return "country"
+        if (has("sex", "gender")) return "gender"
         if (has("address", "street-address", "address-line1")) return "address"
         if (has("address-level2", "city", "locality")) return "city"
         if (has("address-level1", "state", "region")) return "state"
@@ -73,12 +75,14 @@ class PilgrimAutofillService : AutofillService() {
             listOf("email address", "e-mail").any { text.contains(it) } -> "email"
             listOf("date of birth", "dob").any { Regex("(^|[^a-z])" + Regex.escape(it) + "([^a-z]|$)").containsMatchIn(text) } -> "dateOfBirth"
             listOf("postal code", "pin code", "pincode", "zip code").any { text.contains(it) } -> "postalCode"
+            listOf("country", "country name").any { Regex("(^|[^a-z])" + Regex.escape(it) + "([^a-z]|$)").containsMatchIn(text) } -> "country"
             listOf("city", "district").any { Regex("(^|[^a-z])" + Regex.escape(it) + "([^a-z]|$)").containsMatchIn(text) } -> "city"
             listOf("state").any { Regex("(^|[^a-z])state([^a-z]|$)").containsMatchIn(text) } -> "state"
             listOf("address").any { Regex("(^|[^a-z])address([^a-z]|$)").containsMatchIn(text) } -> "address"
             listOf("age").any { Regex("(^|[^a-z])age([^a-z]|$)").containsMatchIn(text) } -> "age"
             listOf("gender", "sex").any { Regex("(^|[^a-z])(gender|sex)([^a-z]|$)").containsMatchIn(text) } -> "gender"
-            listOf("id number", "id card number", "document number").any { text.contains(it) } -> "idNumber"
+            listOf("photo id proof", "id proof", "identity proof", "document type").any { text.contains(it) } -> "idType"
+            listOf("id number", "photo id number", "id card number", "document number").any { text.contains(it) } -> "idNumber"
             else -> null
         }
     }
