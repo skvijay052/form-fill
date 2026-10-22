@@ -188,12 +188,35 @@ class MainActivity : Activity() {
     private fun makeField(key: String, label: String, value: String, bucket: MutableMap<String, EditText>): View {
         val wrap = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         wrap.addView(TextView(this).apply { text = label; textSize = 13f; setTextColor(ink); typeface = Typeface.DEFAULT_BOLD; setPadding(0, dp(7), 0, dp(3)) })
+        if (key == "gender" || key == "idType") {
+            val choices = if (key == "gender") listOf("Select gender", "Male", "Female", "Transgender") else listOf("Select photo ID proof", "Aadhaar Card", "Aadhar Card", "Passport")
+            val stored = EditText(this).apply { setText(value); visibility = View.GONE; importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO }
+            bucket[key] = stored
+            val spinner = Spinner(this)
+            val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, choices)
+            adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+            spinner.adapter = adapter
+            val initial = choices.indexOfFirst { it.equals(value, ignoreCase = true) }
+            spinner.setSelection(if (initial > 0) initial else 0, false)
+            spinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+                override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+                override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
+                    stored.setText(if (position == 0) "" else choices[position])
+                }
+            }
+            spinner.background = rounded(Color.rgb(248,249,252), 10, Color.rgb(226,230,237))
+            spinner.contentDescription = label
+            wrap.addView(spinner, LinearLayout.LayoutParams(-1, dp(50)))
+            wrap.addView(stored)
+            return wrap
+        }
         val input = EditText(this).apply {
             setSingleLine(true); textSize = 15f; setTextColor(ink); setHintTextColor(Color.rgb(151,158,167))
             setPadding(dp(12), 0, dp(12), 0); setText(value)
             hint = when (key) { "age" -> "Enter age"; "email" -> "name@example.com"; "mobile" -> "Enter mobile number"; "postalCode" -> "Enter PIN code"; "dateOfBirth" -> "DD/MM/YYYY"; else -> "Enter $label" }
             background = rounded(Color.rgb(248,249,252), 10, Color.rgb(226,230,237))
-            importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_YES; contentDescription = label
+            importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_YES
+            contentDescription = label
         }
         bucket[key] = input
         wrap.addView(input, LinearLayout.LayoutParams(-1, dp(50)))
