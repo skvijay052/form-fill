@@ -26,6 +26,7 @@ class PilgrimAutofillService : AutofillService() {
         }
         val pilgrims = SecureProfileStore.loadPilgrims(this)
         val general = SecureProfileStore.loadGeneral(this).values()
+            .filterKeys { it in setOf("email", "mobile", "dateOfBirth", "address", "city", "state", "country", "postalCode") }
         val targets = mutableListOf<Target>()
         request.fillContexts.forEach { context ->
             val structure = context.structure
