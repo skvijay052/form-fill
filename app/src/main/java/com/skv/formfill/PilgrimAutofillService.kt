@@ -10,7 +10,6 @@ import android.view.autofill.AutofillId
 import android.app.assist.AssistStructure
 import android.widget.RemoteViews
 import android.os.CancellationSignal
-import android.util.Log
 
 class PilgrimAutofillService : AutofillService() {
     override fun onFillRequest(request: FillRequest, cancellationSignal: CancellationSignal, callback: FillCallback) {
@@ -65,7 +64,7 @@ class PilgrimAutofillService : AutofillService() {
         if (has("address", "street-address", "address-line1")) return "address"
         if (has("address-level2", "city", "locality")) return "city"
         if (has("address-level1", "state", "region")) return "state"
-        val text = listOfNotNull(node.hint, node.text?.toString(), node.idEntry, node.htmlInfo?.attributes?.joinToString(" ") { it.name + "=" + it.value })
+        val text = listOfNotNull(node.hint, node.idEntry, node.htmlInfo?.attributes?.joinToString(" ") { it.first + "=" + it.second })
             .joinToString(" ").lowercase()
         // Do not use generic "name" substring; avoid username, account and ID fields.
         return when {
