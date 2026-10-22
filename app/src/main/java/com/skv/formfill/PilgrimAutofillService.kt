@@ -226,6 +226,11 @@ class PilgrimAutofillService : AutofillService() {
                     hints.any { it in setOf("addresscountry", "country", "countryname") } -> "country"
                     hints.any { it in setOf("age") } -> "age"
                     hints.any { it in setOf("gender", "sex") } -> "gender"
+                    // Some booking forms expose the ID fields only through autocomplete hints.
+                    hints.any { it in setOf("photoidnumber", "photoidno", "idnumber", "idproofnumber", "idproofno", "identitynumber", "documentnumber") } -> "idNumber"
+                    hints.any { it in setOf("photoidproof", "idproof", "identityproof", "documenttype", "identitydocument") } -> "idType"
+                    // Recognize common browser/HTML autocomplete aliases for identity fields.
+                    hints.any { it in setOf("identitydocumentnumber", "documentid", "idcardnumber") } -> "idNumber"
                     // Never map a generic "name" hint to fullName: some websites
                     // incorrectly expose it on every input, which fills Vijay into all fields.
                     // Name is mapped only when the field's own label/ID explicitly identifies it.
