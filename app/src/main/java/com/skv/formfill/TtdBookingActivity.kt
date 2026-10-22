@@ -196,6 +196,7 @@ class TtdBookingActivity : Activity() {
                 ['postalCode',['pincode','postalcode','zipcode']]
               ];
               let filled = 0;
+              const dropdownResults = [];
               const visible = el => !!(el && (el.offsetWidth || el.offsetHeight || el.getClientRects().length));
               const setValue = (el, value) => {
                 if (value == null || value === '' || !el || el.disabled || el.readOnly) return false;
@@ -208,58 +209,79 @@ class TtdBookingActivity : Activity() {
                 return true;
               };
               const sleep = ms => new Promise(r => setTimeout(r, ms));
+              // Include element-center coordinates. The older helper sent all events at (0,0).
               const tapLikeUser = el => {
                 if (!el) return;
-                const opts = { bubbles: true, cancelable: true, view: window };
-                try { el.dispatchEvent(new PointerEvent('pointerdown', {...opts, pointerType:'touch', isPrimary:true})); } catch (_) {}
+                const rect = el.getBoundingClientRect();
+                const x = Math.round(rect.left + rect.width / 2);
+                const y = Math.round(rect.top + rect.height / 2);
+                const opts = { bubbles:true, cancelable:true, view:window,
+                  clientX:x, clientY:y, screenX:x, screenY:y, buttons:1 };
+                try { el.dispatchEvent(new PointerEvent('pointerdown', {
+                  ...opts, pointerId:1, pointerType:'touch', isPrimary:true, button:0
+                })); } catch (_) {}
                 el.dispatchEvent(new MouseEvent('mousedown', opts));
-                try { el.dispatchEvent(new PointerEvent('pointerup', {...opts, pointerType:'touch', isPrimary:true})); } catch (_) {}
-                el.dispatchEvent(new MouseEvent('mouseup', opts));
-                el.dispatchEvent(new MouseEvent('click', opts));
+                try { el.dispatchEvent(new PointerEvent('pointerup', {
+                  ...opts, pointerId:1, pointerType:'touch', isPrimary:true, button:0, buttons:0
+                })); } catch (_) {}
+                el.dispatchEvent(new MouseEvent('mouseup', {...opts, buttons:0}));
+                el.dispatchEvent(new MouseEvent('click', {...opts, buttons:0, detail:1}));
+              };
+              const optionLabel = el => norm(el?.innerText || el?.textContent || el?.getAttribute?.('aria-label') || '');
+              const wantedLabels = (value, kind) => {
+                if (kind === 'idType' && norm(value).includes('aadhaar')) return ['aadhaarcard','aadhaar','aadharcard','aadhar'];
+                if (kind === 'gender' && norm(value) === 'm') return ['male'];
+                if (kind === 'gender' && norm(value) === 'f') return ['female'];
+                return [norm(value)];
               };
               const chooseCustom = async (input, value, kind) => {
-                if (!input || !value) return false;
-                const wanted = kind === 'idType' && norm(value).includes('aadhaar')
-                  ? ['aadhaarcard','aadhaar','aadharcard','aadhar']
-                  : [norm(value)];
-                const findOption = () => {
-                  const candidates = [...document.querySelectorAll('li.floatingDropdown_listItem__tU_5x, li, [role=option]')]
-                    .filter(visible)
-                    .filter(el => wanted.includes(norm(el.innerText || el.textContent || '')));
-                  return candidates.filter(el => el.matches('li.floatingDropdown_listItem__tU_5x')).slice(-1)[0]
-                    || candidates.slice(-1)[0] || null;
-                };
+                const result = {ok:false, field:kind, actual:String(input?.value || ''),
+                  reason:'', optionCount:0};
+                if (!input) { result.reason = 'control-not-found'; return result; }
+                if (!value) { result.reason = 'saved-value-empty'; return result; }
+                const wanted = wantedLabels(value, kind);
                 const matchesValue = () => {
                   const actual = norm(input.value);
-                  return actual === norm(value) ||
-                    (kind === 'idType' && norm(value).includes('aadhaar') && actual.includes('aadhaar'));
+                  return wanted.includes(actual) ||
+                    (kind === 'idType' && wanted.some(w => w.includes('aadhaar') || w.includes('aadhar')) &&
+                    (actual.includes('aadhaar') || actual.includes('aadhar')));
                 };
-                if (matchesValue()) return true;
-
-                // Reuse an already-open TTD popup first. Clicking the input when its
-                // popup is open can close it, which made the previous build miss options.
+                if (matchesValue()) {
+                  result.ok = true; result.actual = String(input.value || ''); result.reason = 'already-selected';
+                  return result;
+                }
+                const findOption = () => {
+                  const all = [...document.querySelectorAll('li.floatingDropdown_listItem__tU_5x, [role="option"], li')]
+                    .filter(visible).filter(el => wanted.includes(optionLabel(el)));
+                  result.optionCount = all.length;
+                  const ttd = all.filter(el => el.matches('li.floatingDropdown_listItem__tU_5x'));
+                  return (ttd.length ? ttd : all).slice(-1)[0] || null;
+                };
                 let option = findOption();
                 if (!option) {
                   input.focus();
                   tapLikeUser(input);
+                  await sleep(250);
+                }
+                for (let attempt = 0; attempt < 12 && !option; attempt++) {
+                  option = findOption();
+                  if (!option) await sleep(120);
+                }
+                if (!option) {
+                  result.reason = 'matching-visible-option-not-found';
+                  result.actual = String(input.value || '');
+                  return result;
+                }
+                tapLikeUser(option);
+                await sleep(300);
+                if (!matchesValue()) {
+                  option.click();
                   await sleep(300);
                 }
-                for (let attempt = 0; attempt < 12; attempt++) {
-                  option = findOption();
-                  if (option) break;
-                  await sleep(150);
-                }
-                if (!option) return false;
-
-                tapLikeUser(option);
-                await sleep(350);
-                if (matchesValue()) return true;
-
-                // Some React dropdowns listen on the list item's parent/container.
-                // Try a normal click only if the first user-like tap did not update input.
-                option.click();
-                await sleep(250);
-                return matchesValue();
+                result.actual = String(input.value || '');
+                result.ok = matchesValue();
+                result.reason = result.ok ? 'selected-and-verified' : 'option-click-did-not-update-control';
+                return result;
               };
               // The Arjitha Seva page repeats pilgrim fields in DOM order. Fill each
               // saved profile against the same-index controls; never copy profile 1
@@ -270,14 +292,24 @@ class TtdBookingActivity : Activity() {
               const genders = [...document.querySelectorAll('input[name="gender"]')].filter(visible);
               const idTypes = [...document.querySelectorAll('input[name="idType"], input[name="photoIdType"]')].filter(visible);
               const idNumbers = [...document.querySelectorAll('input[name="idNumber"], input[name="idProofNumber"]')].filter(visible);
-              for (let i = 0; i < Math.min(saved.length, Math.max(names.length, ages.length, genders.length, idTypes.length, idNumbers.length)); i++) {
+              const rowCount = Math.min(
+                saved.length,
+                Math.max(names.length, ages.length, genders.length, idTypes.length, idNumbers.length)
+              );
+              for (let i = 0; i < rowCount; i++) {
                 const p = saved[i] || {};
                 if (names[i] && setValue(names[i], p.fullName)) filled++;
                 if (ages[i] && setValue(ages[i], p.age)) filled++;
-                if (genders[i] && await chooseCustom(genders[i], p.gender, 'gender')) filled++;
-                if (idTypes[i] && await chooseCustom(idTypes[i], p.idType, 'idType')) filled++;
+                const genderResult = await chooseCustom(genders[i], p.gender, 'gender');
+                const idTypeResult = await chooseCustom(idTypes[i], p.idType, 'idType');
+                dropdownResults.push({
+                  row:i + 1, gender:genderResult, photoId:idTypeResult,
+                  idNumberReady:!!idNumbers[i] && !idNumbers[i].disabled
+                });
+                if (genderResult.ok) filled++;
+                if (idTypeResult.ok) filled++;
                 if (idNumbers[i]) {
-                  for (let wait = 0; wait < 10 && idNumbers[i].disabled; wait++) await sleep(150);
+                  for (let wait = 0; wait < 12 && idNumbers[i].disabled; wait++) await sleep(150);
                   if (setValue(idNumbers[i], p.idNumber)) filled++;
                 }
               }
@@ -309,38 +341,6 @@ class TtdBookingActivity : Activity() {
                   const opts = [...target.options];
                   const match = opts.find(o => norm(o.textContent).includes(norm(value)) || norm(o.value) === norm(value));
                   if (match) { target.value = match.value; target.dispatchEvent(new Event('input',{bubbles:true})); target.dispatchEvent(new Event('change',{bubbles:true})); filled++; }
-                } else if ((key === 'gender' || key === 'idType') && target.matches('input')) {
-                  // TTD renders these dropdowns as input controls. Do not type into them:
-                  // open the control and select the matching visible option from its popup.
-                  target.click();
-                  target.focus();
-                  const desired = key === 'idType' && ['aadhaar','aadhaarcard'].includes(norm(value))
-                    ? ['aadhaarcard','aadhaar'] : key === 'idType' && norm(value).includes('passport')
-                    ? ['passport'] : [norm(value)];
-                  let option = null;
-                  for (let attempt = 0; attempt < 10 && !option; attempt++) {
-                    await new Promise(r => setTimeout(r, 180));
-                    const options = [...document.querySelectorAll(
-                      '[role=option], [role=menuitem], [role=listbox] *, [data-value], li, [class*="option"], [class*="Option"], [class*="item"], [class*="Item"], div, span'
-                    )].filter(visible);
-                    // TTD sometimes renders popup choices as plain div/span elements without ARIA roles.
-                    // Match the smallest visible element with an exact option label, not just known selectors.
-                    option = options.find(el => {
-                      const text = norm(el.innerText || el.textContent || el.getAttribute('aria-label') || '');
-                      const own = norm(el.getAttribute('data-value') || el.getAttribute('value') || '');
-                      const exact = desired.includes(text) || desired.includes(own);
-                      const childHasExact = [...el.children].some(child =>
-                        desired.includes(norm(child.innerText || child.textContent || child.getAttribute('aria-label') || '')) ||
-                        desired.includes(norm(child.getAttribute('data-value') || child.getAttribute('value') || ''))
-                      );
-                      return exact && !childHasExact;
-                    });
-                  }
-                  if (option) {
-                    option.click();
-                    target.dispatchEvent(new Event('change', {bubbles:true}));
-                    filled++;
-                  }
                 } else if (target.matches('input,textarea')) {
                   if (setValue(target, value)) filled++;
                 } else if (target instanceof HTMLSelectElement) {
@@ -356,15 +356,45 @@ class TtdBookingActivity : Activity() {
                   if (option) { option.click(); filled++; }
                 }
               }
-              return filled;
+              return JSON.stringify({filled, dropdownResults, rowCount, controls:{gender:genders.length, photoId:idTypes.length}});
             })()
         """.trimIndent()
         status.text = "Checking visible TTD form fields…"
         web.evaluateJavascript(js) { result ->
-            val count = result?.trim('"')?.toIntOrNull()
-            if (count != null) {
-                status.text = "Filled $count field(s). Review every value before continuing."
-                Toast.makeText(this, "Filled $count field(s). Please review the form.", Toast.LENGTH_LONG).show()
+            val decoded = try {
+                org.json.JSONTokener(result ?: "null").nextValue().toString()
+            } catch (_: Exception) { "" }
+            val report = try { JSONObject(decoded) } catch (_: Exception) { null }
+            if (report != null) {
+                val count = report.optInt("filled", 0)
+                val rows = report.optJSONArray("dropdownResults")
+                val lines = mutableListOf("Filled $count field(s).", "Review all details before continuing.")
+                if (rows == null || rows.length() == 0) {
+                    lines.add("No pilgrim rows detected. Open the pilgrim form and retry.")
+                } else {
+                    for (i in 0 until rows.length()) {
+                        val row = rows.optJSONObject(i) ?: continue
+                        val gender = row.optJSONObject("gender")
+                        val photo = row.optJSONObject("photoId")
+                        val genderStatus = if (gender?.optBoolean("ok") == true) "OK" else "NOT SELECTED"
+                        val photoStatus = if (photo?.optBoolean("ok") == true) "OK" else "NOT SELECTED"
+                        val idReady = if (row.optBoolean("idNumberReady")) "ready" else "still disabled"
+                        lines.add("Row ${row.optInt("row")}: Gender $genderStatus; Photo ID $photoStatus; ID number $idReady.")
+                        if (gender?.optBoolean("ok") != true) {
+                            lines.add("  Gender detail: ${gender?.optString("reason", "unknown") ?: "unknown"}")
+                        }
+                        if (photo?.optBoolean("ok") != true) {
+                            lines.add("  Photo ID detail: ${photo?.optString("reason", "unknown") ?: "unknown"}")
+                        }
+                    }
+                }
+                val summary = lines.joinToString("\n")
+                status.text = "Filled $count field(s). Review dropdown status below."
+                android.app.AlertDialog.Builder(this)
+                    .setTitle("TTD fill report")
+                    .setMessage(summary)
+                    .setPositiveButton("OK", null)
+                    .show()
             } else {
                 status.text = "Fill attempt finished. Check the form and correct any fields manually."
                 Toast.makeText(this, "Please review the form; custom controls may need manual selection.", Toast.LENGTH_LONG).show()
