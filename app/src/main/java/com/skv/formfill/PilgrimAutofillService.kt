@@ -84,7 +84,10 @@ class PilgrimAutofillService : AutofillService() {
             }
             else -> setOf(normalizedValue)
         }
-        return options.indexOfFirst { normalize(it) in aliases }
+        return options.indexOfFirst { option ->
+            val normalizedOption = normalize(option)
+            normalizedOption in aliases || aliases.any { alias -> alias.length >= 4 && (normalizedOption.contains(alias) || alias.contains(normalizedOption)) }
+        }
     }
 
     private fun normalize(value: String): String =
@@ -106,13 +109,15 @@ class PilgrimAutofillService : AutofillService() {
     private fun identify(node: AssistStructure.ViewNode): String? {
         val hints = node.autofillHints?.map { it.lowercase() } ?: emptyList()
         fun has(vararg terms: String) = hints.any { hint -> terms.any { hint == it } }
-        if (has("name", "personname", "fullname", "given-name", "name-given", "name-full")) return "fullName"
+        if (has("name", "personname", "fullname", "given-name", "name-given", "name-full", "name_first", "name_last")) return "fullName"
+        if (has("age")) return "age"
         if (has("email", "emailaddress", "email-address")) return "email"
         if (has("phone", "phonenumber", "phone-number", "tel")) return "mobile"
         if (has("birthdate", "bday", "dateofbirth", "date-of-birth")) return "dateOfBirth"
         if (has("postalcode", "postal-code", "zip", "zip-code")) return "postalCode"
         if (has("country", "country-name", "countryname")) return "country"
         if (has("sex", "gender")) return "gender"
+        if (has("address", "street-address", "address-line1")) return "address"
         if (has("address", "street-address", "address-line1")) return "address"
         if (has("address-level2", "city", "locality")) return "city"
         if (has("address-level1", "state", "region")) return "state"
