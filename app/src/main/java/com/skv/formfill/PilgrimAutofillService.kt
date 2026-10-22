@@ -121,7 +121,7 @@ class PilgrimAutofillService : AutofillService() {
         val explicitNameText = listOfNotNull(
             node.text?.toString(),
             node.idEntry,
-            node.htmlInfo?.attributes?.joinToString(" ") { it.first + "=" + it.second }
+            node.htmlInfo?.attributes?.joinToString(" ") { it.second }
         ).joinToString(" ").lowercase()
         val hintText = node.hint?.toString()?.trim()?.lowercase().orEmpty()
         fun containsLabel(vararg terms: String): Boolean = terms.any { term ->
