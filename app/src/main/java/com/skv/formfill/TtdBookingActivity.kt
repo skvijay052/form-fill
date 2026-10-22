@@ -97,8 +97,24 @@ class TtdBookingActivity : Activity() {
                   ariaLabel: el.getAttribute('aria-label') || '',
                   placeholder: el.getAttribute('placeholder') || '',
                   ariaHaspopup: el.getAttribute('aria-haspopup') || '',
+                  className: typeof el.className === 'string' ? el.className.slice(0,180) : '',
+                  value: el.matches('input,textarea,select') ? (el.value || '').slice(0,80) : '',
                   text: text(el),
+                  parentText: text(el.parentElement || el),
+                  outerHTML: (el.outerHTML || '').slice(0,500),
                   options: el.tagName === 'SELECT' ? [...el.options].map(o => text(o)).slice(0,30) : []
+                })),
+                popupCandidates: [...document.querySelectorAll('body *')].filter(el => {
+                  if (!visible(el)) return false;
+                  const t = (el.innerText || el.textContent || '').trim().replace(/\\s+/g,' ');
+                  return t && t.length < 80 && /^(male|female|transgender|aadhaar card|passport)$/i.test(t);
+                }).slice(0,40).map(el => ({
+                  tag: el.tagName,
+                  className: typeof el.className === 'string' ? el.className.slice(0,180) : '',
+                  role: el.getAttribute('role') || '',
+                  text: text(el),
+                  outerHTML: (el.outerHTML || '').slice(0,500)
+                }))
                 }))
               });
             })()
