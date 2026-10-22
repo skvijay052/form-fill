@@ -52,7 +52,7 @@ object SecureProfileStore {
             val json = JSONObject(String(cipher.doFinal(Base64.decode(data, Base64.NO_WRAP)), StandardCharsets.UTF_8))
             fun v(k: String) = json.optString(k, "")
             PilgrimProfile(v("fullName"), v("age"), v("gender"), v("mobile"), v("email"),
-                v("dateOfBirth"), v("idType"), v("idNumber"), v("address"), v("city"), v("state"), v("postalCode"))
+                v("dateOfBirth"), v("idType"), v("idNumber"), v("address"), v("city"), v("state"), v("country"), v("postalCode"))
         } catch (_: Exception) {
             PilgrimProfile()
         }
