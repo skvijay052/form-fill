@@ -160,13 +160,18 @@ class PilgrimAutofillService : AutofillService() {
         val text = listOfNotNull(
             node.hint?.toString(),
             node.text?.toString(),
+            node.contentDescription?.toString(),
             node.idEntry,
             node.htmlInfo?.attributes?.joinToString(" ") { it.first + "=" + it.second }
         ).joinToString(" ").lowercase()
+        // HTML-backed forms may expose camelCase IDs such as photoIdProof instead
+        // of human-readable labels. Compare a compact form as well as visible text.
+        val compactText = normalize(text)
         val optionsText = node.autofillOptions?.joinToString(" ") { it.toString() }?.lowercase().orEmpty()
         val combined = "$text $optionsText"
         val explicitNameText = listOfNotNull(
             node.text?.toString(),
+            node.contentDescription?.toString(),
             node.idEntry,
             node.htmlInfo?.attributes?.joinToString(" ") { it.second }
         ).joinToString(" ").lowercase()
@@ -180,8 +185,10 @@ class PilgrimAutofillService : AutofillService() {
 
         // Specific labels first, so a generic "name" hint cannot turn every field into a name.
         return when {
-            listOf("photo id number", "photo id no", "id proof number", "id proof no", "proof id number", "id number", "id card number", "document number", "identity number").any { text.contains(it) } -> "idNumber"
-            listOf("photo id proof", "id proof", "identity proof", "document type", "identity document").any { text.contains(it) } -> "idType"
+            listOf("photo id number", "photo id no", "id proof number", "id proof no", "proof id number", "id number", "id card number", "document number", "identity number").any { text.contains(it) } ||
+                listOf("photoidnumber", "photoidno", "idproofnumber", "idproofno", "proofidnumber", "idnumber", "idcardnumber", "documentnumber", "identitynumber").any { compactText.contains(it) } -> "idNumber"
+            listOf("photo id proof", "id proof", "identity proof", "document type", "identity document").any { text.contains(it) } ||
+                listOf("photoidproof", "idproof", "identityproof", "documenttype", "identitydocument").any { compactText.contains(it) } -> "idType"
             containsLabel("email", "e-mail") || text.contains("email address") -> "email"
             containsLabel("mobile", "phone", "telephone", "contact number") || text.contains("mobile number") || text.contains("phone number") -> "mobile"
             containsLabel("date of birth", "dob", "birth date") || text.contains("date-of-birth") -> "dateOfBirth"
