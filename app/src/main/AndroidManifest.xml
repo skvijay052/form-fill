@@ -20,17 +20,5 @@
             <intent-filter><action android:name="android.service.autofill.AutofillService" /></intent-filter>
             <meta-data android:name="android.autofill" android:resource="@xml/autofill_service" />
         </service>
-        <service
-            android:name=".TtdDropdownAccessibilityService"
-            android:label="@string/ttd_dropdown_helper_name"
-            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.accessibilityservice.AccessibilityService" />
-            </intent-filter>
-            <meta-data
-                android:name="android.accessibilityservice"
-                android:resource="@xml/ttd_dropdown_accessibility_service" />
-        </service>
     </application>
 </manifest>
