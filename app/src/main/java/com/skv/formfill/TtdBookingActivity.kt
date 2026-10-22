@@ -139,9 +139,14 @@ class TtdBookingActivity : Activity() {
     }
 
     private fun fillCurrentPage() {
-        val profile = SecureProfileStore.loadPilgrims(this).firstOrNull() ?: PilgrimProfile()
+        val profiles = SecureProfileStore.loadPilgrims(this)
+        val profile = profiles.firstOrNull() ?: PilgrimProfile()
         val general = SecureProfileStore.loadGeneral(this)
         val values = JSONObject().apply {
+            put("pilgrims", org.json.JSONArray().apply { profiles.forEach { p -> put(JSONObject().apply {
+                put("fullName", p.fullName); put("age", p.age); put("gender", p.gender)
+                put("idType", p.idType); put("idNumber", p.idNumber)
+            }) } })
             put("fullName", profile.fullName)
             put("age", profile.age)
             put("gender", profile.gender)
@@ -193,7 +198,7 @@ class TtdBookingActivity : Activity() {
               let filled = 0;
               const visible = el => !!(el && (el.offsetWidth || el.offsetHeight || el.getClientRects().length));
               const setValue = (el, value) => {
-                if (!value || !el || el.disabled || el.readOnly) return false;
+                if (value == null || value === '' || !el || el.disabled || el.readOnly) return false;
                 const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype :
                               el instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
                 const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
@@ -202,7 +207,56 @@ class TtdBookingActivity : Activity() {
                 el.dispatchEvent(new Event('change', {bubbles:true}));
                 return true;
               };
+              const sleep = ms => new Promise(r => setTimeout(r, ms));
+              const chooseCustom = async (input, value, kind) => {
+                if (!input || !value) return false;
+                if (norm(input.value) === norm(value)) return true;
+                input.click();
+                await sleep(300);
+                const wanted = kind === 'idType' && norm(value).includes('aadhaar')
+                  ? ['aadhaarcard','aadhaar','aadharcard','aadhar']
+                  : [norm(value)];
+                // TTD uses plain LI nodes for its custom dropdowns. Match the exact
+                // visible option and prefer that specific dropdown's option list.
+                let option = null;
+                for (let attempt = 0; attempt < 8 && !option; attempt++) {
+                  const candidates = [...document.querySelectorAll('li.floatingDropdown_listItem__tU_5x, li, [role=option]')]
+                    .filter(visible)
+                    .filter(el => {
+                      const t = norm(el.innerText || el.textContent || '');
+                      return wanted.includes(t);
+                    });
+                  option = candidates.find(el => el.matches('li.floatingDropdown_listItem__tU_5x')) || candidates[0] || null;
+                  if (!option) await sleep(150);
+                }
+                if (!option) return false;
+                option.click();
+                await sleep(180);
+                return norm(input.value) === norm(value) ||
+                  (kind === 'idType' && norm(value).includes('aadhaar') && norm(input.value).includes('aadhaar'));
+              };
+              // The Arjitha Seva page repeats pilgrim fields in DOM order. Fill each
+              // saved profile against the same-index controls; never copy profile 1
+              // into every pilgrim row.
+              const saved = Array.isArray(data.pilgrims) ? data.pilgrims : [];
+              const names = [...document.querySelectorAll('input[name="name"], input[name="fname"]')].filter(visible);
+              const ages = [...document.querySelectorAll('input[name="age"]')].filter(visible);
+              const genders = [...document.querySelectorAll('input[name="gender"]')].filter(visible);
+              const idTypes = [...document.querySelectorAll('input[name="idType"], input[name="photoIdType"]')].filter(visible);
+              const idNumbers = [...document.querySelectorAll('input[name="idNumber"], input[name="idProofNumber"]')].filter(visible);
+              for (let i = 0; i < Math.min(saved.length, Math.max(names.length, ages.length, genders.length, idTypes.length, idNumbers.length)); i++) {
+                const p = saved[i] || {};
+                if (names[i] && setValue(names[i], p.fullName)) filled++;
+                if (ages[i] && setValue(ages[i], p.age)) filled++;
+                if (genders[i] && await chooseCustom(genders[i], p.gender, 'gender')) filled++;
+                if (idTypes[i] && await chooseCustom(idTypes[i], p.idType, 'idType')) filled++;
+                if (idNumbers[i]) {
+                  for (let wait = 0; wait < 10 && idNumbers[i].disabled; wait++) await sleep(150);
+                  if (setValue(idNumbers[i], p.idNumber)) filled++;
+                }
+              }
               for (const [key, aliases] of fields) {
+                if (['fullName','age','gender','idType','idNumber'].includes(key)) continue;
                 const value = data[key];
                 if (!value) continue;
                 const candidates = [...document.querySelectorAll('input:not([type=hidden]), textarea, select, [role=combobox], [aria-haspopup=listbox]')].filter(visible);
