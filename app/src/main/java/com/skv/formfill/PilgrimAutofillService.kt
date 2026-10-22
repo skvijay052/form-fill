@@ -107,43 +107,55 @@ class PilgrimAutofillService : AutofillService() {
     }
 
     private fun identify(node: AssistStructure.ViewNode): String? {
-        val hints = node.autofillHints?.map { it.lowercase() } ?: emptyList()
-        fun has(vararg terms: String) = hints.any { hint -> terms.any { hint == it } }
-        if (has("name", "personname", "fullname", "given-name", "name-given", "name-full", "name_first", "name_last")) return "fullName"
-        if (has("age")) return "age"
-        if (has("email", "emailaddress", "email-address")) return "email"
-        if (has("phone", "phonenumber", "phone-number", "tel")) return "mobile"
-        if (has("birthdate", "bday", "dateofbirth", "date-of-birth")) return "dateOfBirth"
-        if (has("postalcode", "postal-code", "zip", "zip-code")) return "postalCode"
-        if (has("country", "country-name", "countryname")) return "country"
-        if (has("sex", "gender")) return "gender"
-        if (has("address", "street-address", "address-line1")) return "address"
-        if (has("address", "street-address", "address-line1")) return "address"
-        if (has("address-level2", "city", "locality")) return "city"
-        if (has("address-level1", "state", "region")) return "state"
-        val text = listOfNotNull(node.hint, node.text?.toString(), node.idEntry, node.htmlInfo?.attributes?.joinToString(" ") { it.first + "=" + it.second })
-            .joinToString(" ").lowercase()
+        // Prefer the actual field label/id/options over generic browser autofill hints.
+        // Some booking pages expose the same generic "name" hint on several inputs.
+        val text = listOfNotNull(
+            node.hint?.toString(),
+            node.text?.toString(),
+            node.idEntry,
+            node.htmlInfo?.attributes?.joinToString(" ") { it.first + "=" + it.second }
+        ).joinToString(" ").lowercase()
         val optionsText = node.autofillOptions?.joinToString(" ") { it.toString() }?.lowercase().orEmpty()
         val combined = "$text $optionsText"
+        fun containsLabel(vararg terms: String): Boolean = terms.any { term ->
+            Regex("(^|[^a-z])" + Regex.escape(term) + "([^a-z]|$)").containsMatchIn(text)
+        }
+
+        // Specific labels first, so a generic "name" hint cannot turn every field into a name.
         return when {
             listOf("photo id proof", "id proof", "identity proof", "document type", "identity document").any { text.contains(it) } -> "idType"
             listOf("photo id number", "id number", "id card number", "document number", "identity number").any { text.contains(it) } -> "idNumber"
-            listOf("gender", "sex").any { Regex("(^|[^a-z])(gender|sex)([^a-z]|$)").containsMatchIn(text) } ||
+            containsLabel("email", "e-mail") || text.contains("email address") -> "email"
+            containsLabel("mobile", "phone", "telephone", "contact number") || text.contains("mobile number") || text.contains("phone number") -> "mobile"
+            containsLabel("date of birth", "dob", "birth date") || text.contains("date-of-birth") -> "dateOfBirth"
+            containsLabel("postal code", "pin code", "pincode", "zip code", "zipcode") -> "postalCode"
+            containsLabel("country", "country name") -> "country"
+            containsLabel("city", "district", "locality") -> "city"
+            containsLabel("state", "region") -> "state"
+            containsLabel("address", "street address", "address line") -> "address"
+            containsLabel("age") -> "age"
+            containsLabel("gender", "sex") ||
                 (node.autofillType == android.view.View.AUTOFILL_TYPE_LIST &&
-                    listOf("male", "female", "transgender").all { combined.contains(it) }) -> "gender"
-            listOf("full name", "pilgrim name", "passenger name", "applicant name").any { text.contains(it) } || Regex("(^|[^a-z])(name|first name|given name)([^a-z]|$)").containsMatchIn(text) -> "fullName"
-            listOf("mobile number", "phone number", "contact number", "mobile", "phone").any { Regex("(^|[^a-z])" + Regex.escape(it) + "([^a-z]|$)").containsMatchIn(text) } -> "mobile"
-            listOf("email address", "e-mail", "email").any { text.contains(it) } -> "email"
-            listOf("date of birth", "dob").any { Regex("(^|[^a-z])" + Regex.escape(it) + "([^a-z]|$)").containsMatchIn(text) } -> "dateOfBirth"
-            listOf("postal code", "pin code", "pincode", "zip code").any { text.contains(it) } -> "postalCode"
-            listOf("country", "country name").any { Regex("(^|[^a-z])" + Regex.escape(it) + "([^a-z]|$)").containsMatchIn(text) } -> "country"
-            listOf("city", "district").any { Regex("(^|[^a-z])" + Regex.escape(it) + "([^a-z]|$)").containsMatchIn(text) } -> "city"
-            Regex("(^|[^a-z])state([^a-z]|$)").containsMatchIn(text) -> "state"
-            Regex("(^|[^a-z])address([^a-z]|$)").containsMatchIn(text) -> "address"
-            Regex("(^|[^a-z])age([^a-z]|$)").containsMatchIn(text) -> "age"
-            listOf("photo id proof", "id proof", "identity proof", "document type").any { text.contains(it) } -> "idType"
-            listOf("id number", "photo id number", "id card number", "document number").any { text.contains(it) } -> "idNumber"
-            else -> null
+                    listOf("male", "female").all { combined.contains(it) }) -> "gender"
+            containsLabel("full name", "pilgrim name", "passenger name", "applicant name", "first name", "given name", "last name", "surname") -> "fullName"
+            // Only use hints after checking visible metadata. Do not accept generic "name" alone.
+            else -> {
+                val hints = node.autofillHints?.map { it.lowercase().replace("_", "").replace("-", "") } ?: emptyList()
+                when {
+                    hints.any { it in setOf("email", "emailaddress") } -> "email"
+                    hints.any { it in setOf("phone", "phonenumber", "tel", "telephone") } -> "mobile"
+                    hints.any { it in setOf("birthdate", "bday", "dateofbirth") } -> "dateOfBirth"
+                    hints.any { it in setOf("postalcode", "zip", "zipcode") } -> "postalCode"
+                    hints.any { it in setOf("address", "streetaddress", "addressline1") } -> "address"
+                    hints.any { it in setOf("addresslocality", "city", "locality") } -> "city"
+                    hints.any { it in setOf("addressregion", "state", "region") } -> "state"
+                    hints.any { it in setOf("addresscountry", "country", "countryname") } -> "country"
+                    hints.any { it in setOf("age") } -> "age"
+                    hints.any { it in setOf("gender", "sex") } -> "gender"
+                    hints.any { it in setOf("personname", "fullname", "name") } -> "fullName"
+                    else -> null
+                }
+            }
         }
     }
 
