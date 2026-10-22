@@ -208,7 +208,7 @@ class PilgrimAutofillService : AutofillService() {
             containsLabel("gender", "sex") ||
                 (listOf("male", "female").all { combined.contains(it) } && hasOptions("male", "female")) -> "gender"
             containsLabel("photo id proof", "id proof", "identity proof", "document type", "identity document") ||
-                (hasOptions("aadhaar", "aadhar", "passport") && !text.contains("number")) -> "idType"
+                (hasOptions("aadhaar", "aadhar", "passport", "driving licence", "driving license", "voter id", "pan card", "national id") && !text.contains("number")) -> "idType"
             containsLabel("full name", "pilgrim name", "passenger name", "applicant name", "first name", "given name", "last name", "surname") ||
                 Regex("(^|[^a-z])name([^a-z]|$)").containsMatchIn(explicitNameText) ||
                 hintText in setOf("name", "full name", "pilgrim name") -> "fullName"
