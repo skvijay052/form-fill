@@ -25,9 +25,21 @@ class TtdBookingActivity : Activity() {
     private val ttdHost = "ttdevasthanams.ap.gov.in"
 
     /**
-     * Executes a real Android touch using normalized WebView viewport coordinates.
+     * Executes a real Android touch on the WebView.
+     *
+     * The page sends the tap position as a FRACTION of the visible viewport
+     * (0..1). Converting a fraction to view pixels only needs web.width/height,
+     * so it is correct on every density / zoom level. The old CSS-px * density *
+     * web.scale maths double-counted density on most devices (getScale() already
+     * includes it), which pushed every tap to the bottom-right corner, so the
+     * dropdown never opened.
      */
     inner class NativeTouchBridge {
+        @JavascriptInterface
+        fun fillDone(json: String) {
+            runOnUiThread { showFillReport(json) }
+        }
+
         @JavascriptInterface
         fun tapFraction(fx: Double, fy: Double, token: String) {
             runOnUiThread {
@@ -36,9 +48,8 @@ class TtdBookingActivity : Activity() {
                     notifyNativeTap(token, false)
                     return@runOnUiThread
                 }
-
-                val x = (fx * web.width).toFloat().coerceIn(1f, web.width - 1f)
-                val y = (fy * web.height).toFloat().coerceIn(1f, web.height - 1f)
+                val x = (fx.toFloat() * web.width).coerceIn(1f, (web.width - 1).toFloat())
+                val y = (fy.toFloat() * web.height).coerceIn(1f, (web.height - 1).toFloat())
                 val downTime = SystemClock.uptimeMillis()
                 val down = createFingerTouchEvent(
                     downTime, downTime, MotionEvent.ACTION_DOWN, x, y
@@ -59,11 +70,6 @@ class TtdBookingActivity : Activity() {
                     notifyNativeTap(token, true)
                 }, 65L)
             }
-        }
-
-        @JavascriptInterface
-        fun fillDone(json: String) {
-            runOnUiThread { showFillReport(json) }
         }
     }
 
@@ -166,6 +172,7 @@ class TtdBookingActivity : Activity() {
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
                     status.text = "TTD page loaded. Open the pilgrim form, then tap Fill saved details."
+                    view?.evaluateJavascript(traceJs, null)
                 }
             }
             loadUrl("https://$ttdHost/")
@@ -174,37 +181,54 @@ class TtdBookingActivity : Activity() {
         setContentView(root)
     }
 
+    /**
+     * Recorder installed on every page load (and again on Inspect). It logs every real
+     * touch/pointer/mouse/click event and, 400 ms after a tap on Gender / Photo ID, a
+     * snapshot of the list items that appeared. Tap the field yourself, then press Inspect.
+     */
+    private val traceJs = """
+        (function() {
+          const key = '__formFillGenderTapTrace';
+          if (window[key]) return;
+          window[key] = [];
+          const visible = el => !!(el && (el.offsetWidth || el.offsetHeight || el.getClientRects().length));
+          const txt = el => (el.innerText || el.textContent || '').trim().replace(/ +/g,' ').slice(0,60);
+          const record = ev => {
+            const trace = window[key];
+            if (!trace || trace.length >= 80) return;
+            const t = ev.target;
+            const ctl = t && t.closest ? t.closest('input[name="gender"],input[name="idType"]') : null;
+            trace.push({
+              type: ev.type, tag: t && t.tagName || '', cls: typeof t.className === 'string' ? t.className.slice(0,80) : '',
+              control: ctl ? ctl.getAttribute('name') : '', trusted: !!ev.isTrusted,
+              x: typeof ev.clientX === 'number' ? Math.round(ev.clientX) : null,
+              y: typeof ev.clientY === 'number' ? Math.round(ev.clientY) : null
+            });
+            if (ctl && ev.type === 'click') {
+              setTimeout(() => {
+                const items = [...document.querySelectorAll('li,[role="option"]')].filter(visible);
+                trace.push({
+                  type: 'snapshot', control: ctl.getAttribute('name'), visibleItems: items.length,
+                  items: items.slice(0,6).map(li => ({
+                    text: txt(li), cls: String(li.className || '').slice(0,80),
+                    parent: li.parentElement ? li.parentElement.tagName + '.' + String(li.parentElement.className || '').slice(0,60) : '',
+                    html: (li.outerHTML || '').slice(0,160)
+                  }))
+                });
+              }, 400);
+            }
+          };
+          for (const type of ['touchstart','touchend','pointerdown','pointerup','mousedown','mouseup','click','focus','input','change']) {
+            document.addEventListener(type, record, true);
+          }
+        })()
+    """.trimIndent()
+
     private fun inspectCurrentPage() {
         val js = """
             (function() {
               const visible = el => !!(el && (el.offsetWidth || el.offsetHeight || el.getClientRects().length));
               const text = el => (el.innerText || el.textContent || '').trim().replace(/\\s+/g,' ').slice(0,100);
-              // Install a short-lived capture trace so the next real manual tap can
-              // reveal whether WebView delivers pointer/mouse/touch events to TTD.
-              const genderTraceKey = '__formFillGenderTapTrace';
-              if (!window[genderTraceKey]) {
-                window[genderTraceKey] = [];
-                const record = ev => {
-                  const target = ev.target;
-                  const gender = target?.closest?.('input[name="gender"]');
-                  const trace = window[genderTraceKey];
-                  if (!trace || trace.length >= 40) return;
-                  trace.push({
-                    type:ev.type,
-                    targetTag:target?.tagName || '',
-                    targetName:target?.getAttribute?.('name') || '',
-                    targetClass:typeof target?.className === 'string' ? target.className.slice(0,100) : '',
-                    onGender:!!gender,
-                    trusted:!!ev.isTrusted,
-                    x:typeof ev.clientX === 'number' ? Math.round(ev.clientX) : null,
-                    y:typeof ev.clientY === 'number' ? Math.round(ev.clientY) : null,
-                    time:Date.now()
-                  });
-                };
-                for (const type of ['touchstart','touchend','pointerdown','pointerup','mousedown','mouseup','click','focus','input','change']) {
-                  document.addEventListener(type, record, true);
-                }
-              }
               const nodes = [...document.querySelectorAll('input,textarea,select,button,[role], [aria-haspopup], [data-testid]')].filter(visible);
               return JSON.stringify({
                 url: location.href,
@@ -225,7 +249,7 @@ class TtdBookingActivity : Activity() {
                   outerHTML: (el.outerHTML || '').slice(0,500),
                   options: el.tagName === 'SELECT' ? [...el.options].map(o => text(o)).slice(0,30) : []
                 })),
-                genderTapTrace: (window.__formFillGenderTapTrace || []).slice(-40),
+                genderTapTrace: (window.__formFillGenderTapTrace || []).slice(-80),
                 tapTargets: ['gender','idType'].map(name => {
                   const el = document.querySelector('input[name="' + name + '"]');
                   if (!el) return {name, found:false};
@@ -261,6 +285,7 @@ class TtdBookingActivity : Activity() {
             })()
         """.trimIndent()
         status.text = "Inspecting visible form controls…"
+        web.evaluateJavascript(traceJs, null)
         web.evaluateJavascript(js) { result ->
             val decoded = try {
                 org.json.JSONTokener(result ?: "null").nextValue().toString()
@@ -362,13 +387,6 @@ class TtdBookingActivity : Activity() {
                 }
                 const rect = el.getBoundingClientRect();
                 if (!rect.width || !rect.height) { resolve(false); return; }
-                const vv = window.visualViewport;
-                const viewportWidth = vv ? vv.width : window.innerWidth;
-                const viewportHeight = vv ? vv.height : window.innerHeight;
-                const offsetLeft = vv ? vv.offsetLeft : 0;
-                const offsetTop = vv ? vv.offsetTop : 0;
-                const fx = (rect.left + rect.width / 2 - offsetLeft) / viewportWidth;
-                const fy = (rect.top + rect.height / 2 - offsetTop) / viewportHeight;
                 window.__formFillNativeTapWaiters ||= Object.create(null);
                 window.__formFillNativeTapDone = (token, delivered) => {
                   const pending = window.__formFillNativeTapWaiters;
@@ -385,7 +403,16 @@ class TtdBookingActivity : Activity() {
                 };
                 window.__formFillNativeTapWaiters[token] = finish;
                 setTimeout(() => finish(false), 1800);
-                window.FormFillNativeTouch.tapFraction(fx, fy, token);
+                // Position as a fraction of the VISIBLE viewport (handles zoom/scroll).
+                const vv = window.visualViewport;
+                const vl = vv ? vv.offsetLeft : 0, vt = vv ? vv.offsetTop : 0;
+                const vw = vv ? vv.width : window.innerWidth;
+                const vh = vv ? vv.height : window.innerHeight;
+                window.FormFillNativeTouch.tapFraction(
+                  (rect.left + rect.width / 2 - vl) / vw,
+                  (rect.top + rect.height / 2 - vt) / vh,
+                  token
+                );
               });
               const tapLikeUser = el => {
                 if (!el) return;
@@ -411,31 +438,33 @@ class TtdBookingActivity : Activity() {
                 if (kind === 'gender' && norm(value) === 'f') return ['female'];
                 return [norm(value)];
               };
+              // Fallback that does not depend on trusted touch events: call the React
+              // handlers (onClick/onMouseDown/...) attached to the element or its parents.
               const reactInvoke = (el, names) => {
-                if (!el) return 0;
+                const prefix = '__reactProps' + String.fromCharCode(36);
                 let called = 0;
-                for (let n = el, depth = 0; n && depth <= 4; n = n.parentElement, depth++) {
-                  const key = Object.keys(n).find(k => k.startsWith('__reactProps' + String.fromCharCode(36)));
+                for (let n = el, depth = 0; n && depth < 4; n = n.parentElement, depth++) {
+                  const key = Object.keys(n).find(k => k.indexOf(prefix) === 0);
                   const props = key ? n[key] : null;
                   if (!props) continue;
                   for (const name of names) {
-                    if (typeof props[name] !== 'function') continue;
-                    const event = {
-                      type:name.replace(/^on/, '').toLowerCase(),
-                      target:el, currentTarget:n,
-                      preventDefault(){}, stopPropagation(){}, persist(){},
-                      isTrusted:true, nativeEvent:{}, button:0, detail:1
-                    };
-                    try { props[name](event); called++; } catch (_) {}
+                    if (typeof props[name] === 'function') {
+                      try {
+                        props[name]({
+                          type: name.slice(2).toLowerCase(), target: el, currentTarget: n,
+                          preventDefault() {}, stopPropagation() {}, persist() {},
+                          isTrusted: true, nativeEvent: {}, button: 0, detail: 1
+                        });
+                        called++;
+                      } catch (_) {}
+                    }
                   }
+                  if (called) break;
                 }
                 return called;
               };
-              const seenOptions = () => [...document.querySelectorAll('li, [role="option"]')]
-                .filter(visible)
-                .map(el => (el.innerText || el.textContent || '').trim().replace(/\\s+/g, ' ').slice(0, 80))
-                .filter(Boolean)
-                .slice(0, 12);
+              const seenOptions = () => [...document.querySelectorAll('li,[role="option"]')]
+                .filter(visible).map(optionLabel).filter(Boolean).slice(0, 12);
               const chooseCustom = async (input, value, kind) => {
                 const result = {ok:false, field:kind, actual:String(input?.value || ''),
                   reason:'', optionCount:0, attempts:[]};
@@ -489,19 +518,16 @@ class TtdBookingActivity : Activity() {
                 let options = findOptions();
                 let triggerDelivered = false;
                 if (!options.length) {
+                  // Centre the control (instant, not smooth) so a fixed footer or a
+                  // smooth-scroll animation cannot make the tap land elsewhere.
                   input.scrollIntoView({block:'center', inline:'nearest', behavior:'instant'});
                   await sleep(400);
-                  const inputRect = input.getBoundingClientRect();
-                  const hit = document.elementFromPoint(
-                    inputRect.left + inputRect.width / 2,
-                    inputRect.top + inputRect.height / 2
-                  );
-                  result.tapHit = hit
-                    ? hit.tagName + '.' + (typeof hit.className === 'string' ? hit.className.slice(0,60) : '')
-                    : 'none-offscreen';
-                  result.tapOnControl = !!hit && (
-                    hit === input || input.contains(hit) || hit.contains(input)
-                  );
+                  {
+                    const r = input.getBoundingClientRect();
+                    const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+                    result.tapHit = hit ? (hit.tagName + '.' + String(hit.className || '').slice(0, 60)) : 'none-offscreen';
+                    result.tapOnControl = !!hit && (hit === input || input.contains(hit) || hit.contains(input));
+                  }
                   triggerDelivered = await nativeTap(input);
                   await sleep(280);
                   options = findOptions();
@@ -512,20 +538,20 @@ class TtdBookingActivity : Activity() {
                   await sleep(300);
                   options = findOptions();
                 }
-                for (let attempt = 0; attempt < 12 && !options.length; attempt++) {
-                  await sleep(100);
-                  options = findOptions();
-                }
                 if (!options.length) {
+                  // Second fallback: call the page's own React handlers directly.
                   for (const h of ['onFocus','onPointerDown','onMouseDown','onClick']) {
-                    const handlersCalled = reactInvoke(input, [h]);
-                    if (handlersCalled > 0) {
+                    if (reactInvoke(input, [h])) {
                       await sleep(350);
                       options = findOptions();
                       result.reactOpened = h;
-                      if (options.length > 0) break;
+                      if (options.length) break;
                     }
                   }
+                }
+                for (let attempt = 0; attempt < 12 && !options.length; attempt++) {
+                  await sleep(100);
+                  options = findOptions();
                 }
                 if (!options.length) {
                   result.reason = triggerDelivered
@@ -571,6 +597,7 @@ class TtdBookingActivity : Activity() {
                   await sleep(250);
                 }
                 if (!matchesValue()) {
+                  // Call the li's own React handlers (works even if events are untrusted).
                   reactInvoke(option, ['onPointerDown','onMouseDown','onPointerUp','onMouseUp','onClick']);
                   await sleep(300);
                 }
@@ -588,10 +615,10 @@ class TtdBookingActivity : Activity() {
                 }
                 result.actual = String(input.value || '');
                 result.ok = matchesValue();
+                if (!result.ok) result.seen = seenOptions();
                 result.reason = result.ok ? 'selected-and-verified' :
                   (optionTapDelivered ? 'android-option-tap-did-not-update-input' :
                    'option-click-did-not-update-input');
-                if (!result.ok) result.seen = seenOptions();
                 return result;
               };
               // The Arjitha Seva page repeats pilgrim fields in DOM order. Fill each
@@ -669,58 +696,58 @@ class TtdBookingActivity : Activity() {
               }
               return JSON.stringify({filled, dropdownResults, rowCount, controls:{gender:genders.length, photoId:idTypes.length}});
             })().then(r => window.FormFillNativeTouch.fillDone(r))
-              .catch(e => window.FormFillNativeTouch.fillDone(JSON.stringify({error:String(e)})))
+                .catch(e => window.FormFillNativeTouch.fillDone(JSON.stringify({error:String(e)})))
         """.trimIndent()
         status.text = "Checking visible TTD form fields…"
         web.evaluateJavascript(js, null)
     }
 
+    /** Called when the fill script has really finished (evaluateJavascript cannot await a Promise). */
     private fun showFillReport(decoded: String) {
         val report = try { JSONObject(decoded) } catch (_: Exception) { null }
-        if (report?.has("error") == true) {
-            val message = report.optString("error", "Unknown error")
-            status.text = "Fill failed: $message"
-            Toast.makeText(this, "Fill failed: $message", Toast.LENGTH_LONG).show()
+        if (report != null && report.has("error")) {
+            status.text = "Fill failed: ${report.optString("error")}"
+            Toast.makeText(this, status.text, Toast.LENGTH_LONG).show()
             return
         }
-        if (report != null) {
-            val count = report.optInt("filled", 0)
-            val rows = report.optJSONArray("dropdownResults")
-            val lines = mutableListOf("Filled $count field(s).", "Review all details before continuing.")
-            if (rows == null || rows.length() == 0) {
-                lines.add("No pilgrim rows detected. Open the pilgrim form and retry.")
-            } else {
-                for (i in 0 until rows.length()) {
-                    val row = rows.optJSONObject(i) ?: continue
-                    val gender = row.optJSONObject("gender")
-                    val photo = row.optJSONObject("photoId")
-                    val genderStatus = if (gender?.optBoolean("ok") == true) "OK" else "NOT SELECTED"
-                    val photoStatus = if (photo?.optBoolean("ok") == true) "OK" else "NOT SELECTED"
-                    val idReady = if (row.optBoolean("idNumberReady")) "ready" else "still disabled"
-                    lines.add("Row ${row.optInt("row")}: Gender $genderStatus; Photo ID $photoStatus; ID number $idReady.")
-                    if (gender?.optBoolean("ok") != true) {
-                        lines.add("  Gender detail: ${gender?.optString("reason", "unknown") ?: "unknown"}")
-                        lines.add("  Visible list items: ${gender?.optJSONArray("seen")?.toString() ?: "[]"}")
-                        lines.add("  Tap hit: ${gender?.optString("tapHit", "-") ?: "-"} (on control: ${gender?.optBoolean("tapOnControl") == true}, react: ${gender?.optString("reactOpened", "-") ?: "-"})")
-                    }
-                    if (photo?.optBoolean("ok") != true) {
-                        lines.add("  Photo ID detail: ${photo?.optString("reason", "unknown") ?: "unknown"}")
-                        lines.add("  Visible list items: ${photo?.optJSONArray("seen")?.toString() ?: "[]"}")
-                        lines.add("  Tap hit: ${photo?.optString("tapHit", "-") ?: "-"} (on control: ${photo?.optBoolean("tapOnControl") == true}, react: ${photo?.optString("reactOpened", "-") ?: "-"})")
+            if (report != null) {
+                val count = report.optInt("filled", 0)
+                val rows = report.optJSONArray("dropdownResults")
+                val lines = mutableListOf("Filled $count field(s).", "Review all details before continuing.")
+                if (rows == null || rows.length() == 0) {
+                    lines.add("No pilgrim rows detected. Open the pilgrim form and retry.")
+                } else {
+                    for (i in 0 until rows.length()) {
+                        val row = rows.optJSONObject(i) ?: continue
+                        val gender = row.optJSONObject("gender")
+                        val photo = row.optJSONObject("photoId")
+                        val genderStatus = if (gender?.optBoolean("ok") == true) "OK" else "NOT SELECTED"
+                        val photoStatus = if (photo?.optBoolean("ok") == true) "OK" else "NOT SELECTED"
+                        val idReady = if (row.optBoolean("idNumberReady")) "ready" else "still disabled"
+                        lines.add("Row ${row.optInt("row")}: Gender $genderStatus; Photo ID $photoStatus; ID number $idReady.")
+                        if (gender?.optBoolean("ok") != true) {
+                            lines.add("  Gender detail: ${gender?.optString("reason", "unknown") ?: "unknown"}")
+                            gender?.optJSONArray("seen")?.let { lines.add("  Visible list items: $it") }
+                            gender?.let { lines.add("  Tap hit: ${it.optString("tapHit", "-")} (on control: ${it.optBoolean("tapOnControl")}, react: ${it.optString("reactOpened", "-")})") }
+                        }
+                        if (photo?.optBoolean("ok") != true) {
+                            lines.add("  Photo ID detail: ${photo?.optString("reason", "unknown") ?: "unknown"}")
+                            photo?.optJSONArray("seen")?.let { lines.add("  Visible list items: $it") }
+                            photo?.let { lines.add("  Tap hit: ${it.optString("tapHit", "-")} (on control: ${it.optBoolean("tapOnControl")}, react: ${it.optString("reactOpened", "-")})") }
+                        }
                     }
                 }
+                val summary = lines.joinToString("\n")
+                status.text = "Filled $count field(s). Review dropdown status below."
+                android.app.AlertDialog.Builder(this)
+                    .setTitle("TTD fill report")
+                    .setMessage(summary)
+                    .setPositiveButton("OK", null)
+                    .show()
+            } else {
+                status.text = "Fill attempt finished. Check the form and correct any fields manually."
+                Toast.makeText(this, "Please review the form; custom controls may need manual selection.", Toast.LENGTH_LONG).show()
             }
-            val summary = lines.joinToString("\\n")
-            status.text = "Filled $count field(s). Review dropdown status below."
-            android.app.AlertDialog.Builder(this)
-                .setTitle("TTD fill report")
-                .setMessage(summary)
-                .setPositiveButton("OK", null)
-                .show()
-        } else {
-            status.text = "Fill attempt finished. Check the form and correct any fields manually."
-            Toast.makeText(this, "Please review the form; custom controls may need manual selection.", Toast.LENGTH_LONG).show()
-        }
     }
 
     override fun onDestroy() {
