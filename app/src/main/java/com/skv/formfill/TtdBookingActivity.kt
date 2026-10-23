@@ -543,28 +543,39 @@ class TtdBookingActivity : Activity() {
                 );
               });
               const nativePaste = async (el, value) => {
+                const result = {attempted:false, tapped:false, bridgeCalled:false, bridgeDelivered:false,
+                  valueImmediately:'', valueAfterWait:'', activeAfterTap:'', error:''};
                 if (!el || !value || !window.FormFillNativeTouch ||
-                    typeof window.FormFillNativeTouch.pasteText !== 'function') return false;
-                const tapped = await nativeTap(el);
-                if (!tapped) return false;
-                await sleep(120);
-                const token = 'ffpaste_' + Date.now() + '_' + Math.random().toString(36).slice(2);
-                const pasted = new Promise(resolve => {
-                  window.__formFillNativeTapWaiters ||= Object.create(null);
-                  let settled = false;
-                  const finish = ok => {
-                    if (settled) return;
-                    settled = true;
-                    delete window.__formFillNativeTapWaiters[token];
-                    resolve(!!ok);
-                  };
-                  window.__formFillNativeTapWaiters[token] = finish;
-                  setTimeout(() => finish(false), 1800);
-                  window.FormFillNativeTouch.pasteText(String(value), token);
-                });
-                await pasted;
-                await sleep(250);
-                return String(el.value || '') === String(value);
+                    typeof window.FormFillNativeTouch.pasteText !== 'function') {
+                  result.error = 'paste-bridge-unavailable'; return result;
+                }
+                result.attempted = true;
+                try {
+                  result.tapped = await nativeTap(el);
+                  await sleep(120);
+                  result.activeAfterTap = document.activeElement
+                    ? (document.activeElement.tagName + '.' + (document.activeElement.getAttribute('name') || '')) : '';
+                  const token = 'ffpaste_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+                  const pasted = new Promise(resolve => {
+                    window.__formFillNativeTapWaiters ||= Object.create(null);
+                    let settled = false;
+                    const finish = ok => {
+                      if (settled) return;
+                      settled = true;
+                      delete window.__formFillNativeTapWaiters[token];
+                      resolve(!!ok);
+                    };
+                    window.__formFillNativeTapWaiters[token] = finish;
+                    setTimeout(() => finish(false), 1800);
+                    result.bridgeCalled = true;
+                    window.FormFillNativeTouch.pasteText(String(value), token);
+                  });
+                  result.bridgeDelivered = await pasted;
+                  result.valueImmediately = String(el.value || '');
+                  await sleep(450);
+                  result.valueAfterWait = String(el.value || '');
+                } catch (e) { result.error = String(e); }
+                return result;
               };
               const tapLikeUser = el => {
                 if (!el) return;
@@ -891,14 +902,18 @@ class TtdBookingActivity : Activity() {
                 if (!data.dropdownsOnly) {
                   let nameOk = false;
                   let ageOk = false;
+                  let namePaste = null, agePaste = null;
                   if (names[i] && p.fullName) {
-                    nameOk = await nativePaste(names[i], p.fullName);
+                    namePaste = await nativePaste(names[i], p.fullName);
+                    nameOk = String(names[i].value || '') === String(p.fullName);
                     if (!nameOk) nameOk = setValue(names[i], p.fullName);
                   }
                   if (ages[i] && p.age) {
-                    ageOk = await nativePaste(ages[i], p.age);
+                    agePaste = await nativePaste(ages[i], p.age);
+                    ageOk = String(ages[i].value || '') === String(p.age);
                     if (!ageOk) ageOk = setValue(ages[i], p.age);
                   }
+                  textFieldResults.push({row:i+1, diagnostic:{namePaste,agePaste}});
                   if (nameOk) filled++;
                   if (ageOk) filled++;
                   textFieldResults.push({
