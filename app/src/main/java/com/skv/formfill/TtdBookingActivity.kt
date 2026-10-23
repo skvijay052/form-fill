@@ -455,6 +455,14 @@ class TtdBookingActivity : Activity() {
                 try { el.dispatchEvent(new InputEvent('input', {bubbles:true, composed:true, inputType:'insertText', data:String(value)})); }
                 catch (_) { el.dispatchEvent(new Event('input', {bubbles:true, composed:true})); }
                 el.dispatchEvent(new Event('change', {bubbles:true, composed:true}));
+                // TTD's React-controlled inputs may not commit synthetic native events
+                // consistently inside Android WebView. Invoke the element's React onChange
+                // prop as an additional fallback after setting the DOM value.
+                try {
+                  if (typeof reactInvoke === 'function') {
+                    reactInvoke(el, ['onChange']);
+                  }
+                } catch (_) {}
                 try { el.dispatchEvent(new KeyboardEvent('keyup', {bubbles:true, key:'Unidentified'})); } catch (_) {}
                 checks.push([el, String(value)]);
                 // Some controlled fields restore the old value on the next render; verify
