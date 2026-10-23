@@ -447,9 +447,40 @@ class TtdBookingActivity : Activity() {
                   actual:String(input.value || '')
                 });
                 if (!matchesValue()) {
-                  // Last fallback uses the option's own click handler/delegation.
-                  option.click();
-                  await sleep(300);
+                  // Some React dropdowns listen on a nested element or on pointer/mouse
+                  // events rather than the LI itself. Try the deepest visible text node
+                  // target first, then a complete DOM pointer/mouse sequence.
+                  const clickable = option.querySelector('button,[role="option"],span,div') || option;
+                  try { clickable.click(); } catch (_) {}
+                  await sleep(180);
+                }
+                if (!matchesValue()) {
+                  const rect = option.getBoundingClientRect();
+                  const x = Math.round(rect.left + rect.width / 2);
+                  const y = Math.round(rect.top + rect.height / 2);
+                  const opts = {bubbles:true, cancelable:true, view:window,
+                    clientX:x, clientY:y, button:0, buttons:1, detail:1};
+                  for (const type of ['pointerdown','mousedown','pointerup','mouseup','click']) {
+                    try {
+                      const ev = type.startsWith('pointer')
+                        ? new PointerEvent(type, {...opts, pointerId:1, pointerType:'touch', isPrimary:true})
+                        : new MouseEvent(type, {...opts, buttons:type.endsWith('up') || type === 'click' ? 0 : 1});
+                      option.dispatchEvent(ev);
+                    } catch (_) {}
+                  }
+                  await sleep(250);
+                }
+                if (!matchesValue()) {
+                  // Last resort for accessible custom comboboxes: use their keyboard
+                  // selection path. Never overwrite the input value directly; React
+                  // must commit the selected option itself.
+                  try { input.focus(); } catch (_) {}
+                  for (const key of ['ArrowDown','Enter']) {
+                    input.dispatchEvent(new KeyboardEvent('keydown', {key, code:key, bubbles:true, cancelable:true}));
+                    input.dispatchEvent(new KeyboardEvent('keyup', {key, code:key, bubbles:true, cancelable:true}));
+                    await sleep(100);
+                  }
+                  await sleep(250);
                 }
                 result.actual = String(input.value || '');
                 result.ok = matchesValue();
