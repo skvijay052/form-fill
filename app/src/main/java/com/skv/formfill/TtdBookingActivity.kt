@@ -438,14 +438,19 @@ class TtdBookingActivity : Activity() {
                 if (value == null || value === '' || !el || el.disabled || el.readOnly) return false;
                 // After the autofill suggestion, keep what Android already filled; only fill empty inputs.
                 if (data.auto && String(el.value || '') !== '') return false;
+                const oldValue = String(el.value || '');
                 const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype :
                               el instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
                 const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
-                if (setter) setter.call(el, value); else el.value = value;
-                el.dispatchEvent(new Event('input', {bubbles:true}));
-                el.dispatchEvent(new Event('change', {bubbles:true}));
-                checks.push([el, value]);
-                return true;
+                // React-controlled inputs track value changes. Use the native setter and
+                // reset React's tracker to the previous value so its onChange sees the edit.
+                if (setter) setter.call(el, String(value)); else el.value = String(value);
+                try { if (el._valueTracker && typeof el._valueTracker.setValue === 'function') el._valueTracker.setValue(oldValue); } catch (_) {}
+                el.dispatchEvent(new Event('input', {bubbles:true, composed:true}));
+                el.dispatchEvent(new Event('change', {bubbles:true, composed:true}));
+                try { el.dispatchEvent(new Event('blur', {bubbles:true})); } catch (_) {}
+                checks.push([el, String(value)]);
+                return String(el.value || '') === String(value);
               };
               const sleep = ms => new Promise(r => setTimeout(r, ms));
               // Include element-center coordinates. The older helper sent all events at (0,0).
@@ -806,6 +811,7 @@ class TtdBookingActivity : Activity() {
               const saved = Array.isArray(data.pilgrims) ? data.pilgrims : [];
               const names = [...document.querySelectorAll('input[name="name"], input[name="fname"]')].filter(visible);
               const ages = [...document.querySelectorAll('input[name="age"]')].filter(visible);
+              const textFieldResults = [];
               const genders = [...document.querySelectorAll('input[name="gender"]')].filter(visible);
               const idTypes = [...document.querySelectorAll('input[name="idType"], input[name="photoIdType"]')].filter(visible);
               const idNumbers = [...document.querySelectorAll('input[name="idNumber"], input[name="idProofNumber"]')].filter(visible);
@@ -815,8 +821,17 @@ class TtdBookingActivity : Activity() {
               );
               for (let i = 0; i < rowCount; i++) {
                 const p = saved[i] || {};
-                if (!data.dropdownsOnly && names[i] && setValue(names[i], p.fullName)) filled++;
-                if (!data.dropdownsOnly && ages[i] && setValue(ages[i], p.age)) filled++;
+                if (!data.dropdownsOnly) {
+                  const nameOk = !!names[i] && !!p.fullName && setValue(names[i], p.fullName);
+                  const ageOk = !!ages[i] && !!p.age && setValue(ages[i], p.age);
+                  if (nameOk) filled++;
+                  if (ageOk) filled++;
+                  textFieldResults.push({
+                    row:i + 1,
+                    name:{found:!!names[i], saved:!!p.fullName, actual:String(names[i]?.value || ''), expected:String(p.fullName || ''), ok:!!names[i] && String(names[i].value || '') === String(p.fullName || '') && !!p.fullName},
+                    age:{found:!!ages[i], saved:!!p.age, actual:String(ages[i]?.value || ''), expected:String(p.age || ''), ok:!!ages[i] && String(ages[i].value || '') === String(p.age || '') && !!p.age}
+                  });
+                }
               }
               try {
                 if (window.FormFillNativeTouch && window.FormFillNativeTouch.progress) {
@@ -873,7 +888,7 @@ class TtdBookingActivity : Activity() {
                 .map(c => c[0].getAttribute('name') || c[0].getAttribute('label') || '?');
               const dropOk = dropdownResults.reduce((n, r) => n + (r.gender.ok ? 1 : 0) + (r.photoId.ok ? 1 : 0), 0);
               window.__ffBusy = false; window.__ffLastFill = Date.now();
-              return JSON.stringify({filled: textOk + dropOk, attempted: filled, textMismatch, dropdownResults, rowCount, controls:{gender:genders.length, photoId:idTypes.length}});
+              return JSON.stringify({filled: textOk + dropOk, attempted: filled, textMismatch, textFieldResults, dropdownResults, rowCount, controls:{name:names.length, age:ages.length, gender:genders.length, photoId:idTypes.length}});
             })().then(r => window.FormFillNativeTouch.fillDone(r))
                 .catch(e => { window.__ffBusy = false; window.__ffLastFill = Date.now();
                               window.FormFillNativeTouch.fillDone(JSON.stringify({error:String(e)})); })
