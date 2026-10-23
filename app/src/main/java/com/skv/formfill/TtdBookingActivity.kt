@@ -39,9 +39,15 @@ class TtdBookingActivity : Activity() {
                     return@runOnUiThread
                 }
 
-                val scale = web.scale.takeIf { it > 0f } ?: resources.displayMetrics.density
-                val x = (xCss.toFloat() * scale).coerceIn(1f, (web.width - 1).toFloat())
-                val y = (yCss.toFloat() * scale).coerceIn(1f, (web.height - 1).toFloat())
+                // getBoundingClientRect() reports CSS pixels. Android View touch
+                // coordinates use physical view pixels, so the display density must
+                // be applied in addition to the page zoom factor. Omitting density
+                // makes taps land too far toward the top-left on high-density phones.
+                val density = resources.displayMetrics.density.takeIf { it > 0f } ?: 1f
+                val pageScale = web.scale.takeIf { it > 0f } ?: 1f
+                val cssToViewPixels = density * pageScale
+                val x = (xCss.toFloat() * cssToViewPixels).coerceIn(1f, (web.width - 1).toFloat())
+                val y = (yCss.toFloat() * cssToViewPixels).coerceIn(1f, (web.height - 1).toFloat())
                 val downTime = SystemClock.uptimeMillis()
                 val down = createFingerTouchEvent(
                     downTime, downTime, MotionEvent.ACTION_DOWN, x, y
