@@ -425,6 +425,14 @@ class TtdBookingActivity : Activity() {
                 }
                 const rect = el.getBoundingClientRect();
                 if (!rect.width || !rect.height) { resolve(false); return; }
+                // Pick a point inside the element that the element itself really owns
+                // (not covered by a footer / overlay). Falls back to the centre.
+                let px = rect.left + rect.width / 2, py = rect.top + rect.height / 2;
+                for (const [fx, fy] of [[.5,.5],[.25,.5],[.75,.5],[.5,.3],[.5,.7],[.1,.5],[.9,.5]]) {
+                  const x = rect.left + rect.width * fx, y = rect.top + rect.height * fy;
+                  const h = document.elementFromPoint(x, y);
+                  if (h && (h === el || el.contains(h))) { px = x; py = y; break; }
+                }
                 window.__formFillNativeTapWaiters ||= Object.create(null);
                 window.__formFillNativeTapDone = (token, delivered) => {
                   const pending = window.__formFillNativeTapWaiters;
@@ -447,8 +455,8 @@ class TtdBookingActivity : Activity() {
                 const vw = vv ? vv.width : window.innerWidth;
                 const vh = vv ? vv.height : window.innerHeight;
                 window.FormFillNativeTouch.tapFraction(
-                  (rect.left + rect.width / 2 - vl) / vw,
-                  (rect.top + rect.height / 2 - vt) / vh,
+                  (px - vl) / vw,
+                  (py - vt) / vh,
                   token
                 );
               });
@@ -500,6 +508,18 @@ class TtdBookingActivity : Activity() {
                   if (called) break;
                 }
                 return called;
+              };
+              const describeAround = el => {
+                const wrap = (el.parentElement && el.parentElement.parentElement) || el.parentElement;
+                const dd = [...document.querySelectorAll('[class*="ropdown"],ul')].slice(0, 6).map(n => {
+                  const cs = getComputedStyle(n), r = n.getBoundingClientRect();
+                  return n.tagName + '.' + String(n.className).slice(0, 40) + ' d:' + cs.display +
+                    ' v:' + cs.visibility + ' o:' + cs.opacity + ' h:' + Math.round(r.height) +
+                    ' li:' + n.querySelectorAll('li').length;
+                });
+                const a = document.activeElement;
+                return {disabled: !!el.disabled, active: a ? a.tagName + '.' + (a.getAttribute('name') || '') : '',
+                        dropdowns: dd, wrap: (wrap ? wrap.outerHTML : '').slice(0, 300)};
               };
               const seenOptions = () => [...document.querySelectorAll('li,[role="option"]')]
                 .filter(visible).map(optionLabel).filter(Boolean).slice(0, 12);
@@ -566,13 +586,13 @@ class TtdBookingActivity : Activity() {
                 for (let attempt = 0; attempt < 3 && !options.length; attempt++) {
                   // Centre the control (instant, not smooth) so a fixed footer or a
                   // smooth-scroll animation cannot make the tap land elsewhere.
-                  input.scrollIntoView({block:'center', inline:'nearest', behavior:'instant'});
+                  input.scrollIntoView({block: attempt === 1 ? 'end' : 'center', inline:'nearest', behavior:'instant'});
                   await sleep(400);
                   {
                     const r = input.getBoundingClientRect();
                     const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
                     result.tapHit = hit ? (hit.tagName + '.' + String(hit.className || '').slice(0, 60)) : 'none-offscreen';
-                    result.tapOnControl = !!hit && (hit === input || input.contains(hit) || hit.contains(input));
+                    result.tapOnControl = !!hit && (hit === input || input.contains(hit));
                   }
                   if (attempt === 0 || attempt === 1) {
                     triggerDelivered = await nativeTap(input);
@@ -597,6 +617,7 @@ class TtdBookingActivity : Activity() {
                     : 'dropdown-did-not-open-after-native-and-dom-taps';
                   result.actual = String(input.value || '');
                   result.seen = seenOptions();
+                  result.dom = describeAround(input);
                   return result;
                 }
 
@@ -662,6 +683,10 @@ class TtdBookingActivity : Activity() {
               // The Arjitha Seva page repeats pilgrim fields in DOM order. Fill each
               // saved profile against the same-index controls; never copy profile 1
               // into every pilgrim row.
+              // Android Autofill is started from a focused input, so the keyboard is open and the
+              // page is resized. Blur it and let the layout settle before measuring anything.
+              try { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); } catch (_) {}
+              await sleep(data.dropdownsOnly ? 1300 : 300);
               const saved = Array.isArray(data.pilgrims) ? data.pilgrims : [];
               const names = [...document.querySelectorAll('input[name="name"], input[name="fname"]')].filter(visible);
               const ages = [...document.querySelectorAll('input[name="age"]')].filter(visible);
@@ -688,6 +713,31 @@ class TtdBookingActivity : Activity() {
                 if (idNumbers[i]) {
                   for (let wait = 0; wait < 12 && idNumbers[i].disabled; wait++) await sleep(150);
                   if (setValue(idNumbers[i], p.idNumber)) filled++;
+                }
+              }
+              for (let pass = 0; pass < 2; pass++) {
+                const bad = dropdownResults.filter(r => !r.gender.ok || !r.photoId.ok);
+                if (!bad.length) break;
+                await sleep(900);
+                const g2 = [...document.querySelectorAll('input[name="gender"]')].filter(visible);
+                const t2 = [...document.querySelectorAll('input[name="idType"], input[name="photoIdType"]')].filter(visible);
+                const n2 = [...document.querySelectorAll('input[name="idNumber"], input[name="idProofNumber"]')].filter(visible);
+                for (const r of bad) {
+                  const i = r.row - 1, p = saved[i] || {};
+                  if (!r.gender.ok) {
+                    r.gender = await chooseCustom(g2[i], p.gender, 'gender');
+                    if (r.gender.ok) filled++;
+                    await sleep(700);
+                  }
+                  if (!r.photoId.ok) {
+                    r.photoId = await chooseCustom(t2[i], p.idType, 'idType');
+                    if (r.photoId.ok) filled++;
+                  }
+                  if (n2[i]) {
+                    for (let wait = 0; wait < 12 && n2[i].disabled; wait++) await sleep(150);
+                    r.idNumberReady = !n2[i].disabled;
+                    if (r.photoId.ok && setValue(n2[i], p.idNumber)) filled++;
+                  }
                 }
               }
               for (const [key, aliases] of fields) {
@@ -740,6 +790,8 @@ class TtdBookingActivity : Activity() {
                 .catch(e => { window.__ffBusy = false; window.__ffLastFill = Date.now();
                               window.FormFillNativeTouch.fillDone(JSON.stringify({error:String(e)})); })
         """.trimIndent()
+        (getSystemService(INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager)
+            ?.hideSoftInputFromWindow(web.windowToken, 0)
         status.text = if (dropdownsOnly) "Autofill detected, selecting dropdowns…" else "Checking visible TTD form fields…"
         web.evaluateJavascript(js, null)
     }
@@ -773,11 +825,13 @@ class TtdBookingActivity : Activity() {
                         if (gender?.optBoolean("ok") != true) {
                             lines.add("  Gender detail: ${gender?.optString("reason", "unknown") ?: "unknown"}")
                             gender?.optJSONArray("seen")?.let { lines.add("  Visible list items: $it") }
+                            gender?.optJSONObject("dom")?.let { lines.add("  DOM: ${it.toString().take(450)}") }
                             gender?.let { lines.add("  Tap hit: ${it.optString("tapHit", "-")} (on control: ${it.optBoolean("tapOnControl")}, react: ${it.optString("reactOpened", "-")})") }
                         }
                         if (photo?.optBoolean("ok") != true) {
                             lines.add("  Photo ID detail: ${photo?.optString("reason", "unknown") ?: "unknown"}")
                             photo?.optJSONArray("seen")?.let { lines.add("  Visible list items: $it") }
+                            photo?.optJSONObject("dom")?.let { lines.add("  DOM: ${it.toString().take(450)}") }
                             photo?.let { lines.add("  Tap hit: ${it.optString("tapHit", "-")} (on control: ${it.optBoolean("tapOnControl")}, react: ${it.optString("reactOpened", "-")})") }
                         }
                     }
