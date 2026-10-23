@@ -236,51 +236,85 @@ class TtdBookingActivity : Activity() {
               };
               const chooseCustom = async (input, value, kind) => {
                 const result = {ok:false, field:kind, actual:String(input?.value || ''),
-                  reason:'', optionCount:0};
+                  reason:'', optionCount:0, attempts:[]};
                 if (!input) { result.reason = 'control-not-found'; return result; }
                 if (!value) { result.reason = 'saved-value-empty'; return result; }
                 const wanted = wantedLabels(value, kind);
                 const matchesValue = () => {
                   const actual = norm(input.value);
                   return wanted.includes(actual) ||
-                    (kind === 'idType' && wanted.some(w => w.includes('aadhaar') || w.includes('aadhar')) &&
-                    (actual.includes('aadhaar') || actual.includes('aadhar')));
+                    (kind === 'idType' && (actual.includes('aadhaar') || actual.includes('aadhar')) &&
+                     wanted.some(w => w.includes('aadhaar') || w.includes('aadhar')));
                 };
                 if (matchesValue()) {
                   result.ok = true; result.actual = String(input.value || ''); result.reason = 'already-selected';
                   return result;
                 }
-                const findOption = () => {
+                const rowFor = el => {
+                  let node = el;
+                  for (let depth = 0; node && depth < 8; depth++, node = node.parentElement) {
+                    const hasName = !!node.querySelector('input[name="name"],input[name="fname"]');
+                    const hasGender = !!node.querySelector('input[name="gender"]');
+                    if (hasName && hasGender) return node;
+                  }
+                  return input.closest('form') || input.parentElement || document;
+                };
+                const row = rowFor(input);
+                const findOptions = () => {
                   const all = [...document.querySelectorAll('li.floatingDropdown_listItem__tU_5x, [role="option"], li')]
                     .filter(visible).filter(el => wanted.includes(optionLabel(el)));
                   result.optionCount = all.length;
-                  const ttd = all.filter(el => el.matches('li.floatingDropdown_listItem__tU_5x'));
-                  return (ttd.length ? ttd : all).slice(-1)[0] || null;
+                  // Prefer options rendered inside this pilgrim row. If the site portals
+                  // its menu to document.body, choose the matching option nearest this input.
+                  const inRow = all.filter(el => row.contains(el));
+                  const pool = inRow.length ? inRow : all;
+                  const rect = input.getBoundingClientRect();
+                  const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
+                  return pool.sort((a,b) => {
+                    const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+                    const da = Math.abs(ra.left + ra.width/2 - cx) + Math.abs(ra.top + ra.height/2 - cy);
+                    const db = Math.abs(rb.left + rb.width/2 - cx) + Math.abs(rb.top + rb.height/2 - cy);
+                    return da - db;
+                  });
                 };
-                let option = findOption();
-                if (!option) {
-                  input.focus();
+                // First trigger the actual custom control. React's onClick handler
+                // is more important here than synthetic pointer events.
+                input.focus();
+                input.click();
+                input.dispatchEvent(new MouseEvent('mousedown', {bubbles:true, cancelable:true, view:window}));
+                await sleep(250);
+                let options = findOptions();
+                for (let attempt = 0; attempt < 15 && !options.length; attempt++) {
+                  await sleep(100);
+                  options = findOptions();
+                }
+                if (!options.length) {
+                  // Some dropdowns open on pointer/mouse down rather than click.
                   tapLikeUser(input);
                   await sleep(250);
+                  options = findOptions();
                 }
-                for (let attempt = 0; attempt < 12 && !option; attempt++) {
-                  option = findOption();
-                  if (!option) await sleep(120);
-                }
-                if (!option) {
-                  result.reason = 'matching-visible-option-not-found';
+                if (!options.length) {
+                  result.reason = 'dropdown-triggered-but-no-visible-matching-li';
                   result.actual = String(input.value || '');
                   return result;
                 }
-                tapLikeUser(option);
-                await sleep(300);
-                if (!matchesValue()) {
+                for (const option of options.slice(0, 3)) {
+                  // Use the DOM click so the framework's delegated click handler
+                  // receives the event from the actual option node.
+                  option.scrollIntoView({block:'nearest', inline:'nearest'});
                   option.click();
-                  await sleep(300);
+                  await sleep(250);
+                  result.attempts.push({text:optionLabel(option), actual:String(input.value || '')});
+                  if (matchesValue()) break;
+                  // If the menu remains open, retry with pointer/mouse sequence.
+                  tapLikeUser(option);
+                  await sleep(200);
+                  if (matchesValue()) break;
                 }
                 result.actual = String(input.value || '');
                 result.ok = matchesValue();
-                result.reason = result.ok ? 'selected-and-verified' : 'option-click-did-not-update-control';
+                result.reason = result.ok ? 'selected-and-verified' : 'visible-li-click-did-not-update-input';
                 return result;
               };
               // The Arjitha Seva page repeats pilgrim fields in DOM order. Fill each
