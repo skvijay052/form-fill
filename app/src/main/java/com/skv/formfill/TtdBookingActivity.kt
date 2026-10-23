@@ -3,8 +3,11 @@ package com.skv.formfill
 import android.app.Activity
 import android.graphics.Color
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
+import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -19,6 +22,57 @@ class TtdBookingActivity : Activity() {
     private lateinit var web: WebView
     private lateinit var status: TextView
     private val ttdHost = "ttdevasthanams.ap.gov.in"
+
+    /**
+     * Executes a real Android touch on the WebView at a CSS viewport coordinate.
+     * The web page reports coordinates from getBoundingClientRect(); WebView scale
+     * maps those CSS pixels back to the view's physical pixel coordinates.
+     */
+    private inner class NativeTouchBridge {
+        @JavascriptInterface
+        fun tapCss(xCss: Double, yCss: Double, token: String) {
+            runOnUiThread {
+                if (!::web.isInitialized || web.width <= 1 || web.height <= 1 ||
+                    !xCss.isFinite() || !yCss.isFinite()) {
+                    notifyNativeTap(token, false)
+                    return@runOnUiThread
+                }
+
+                val scale = web.scale.takeIf { it > 0f } ?: resources.displayMetrics.density
+                val x = (xCss.toFloat() * scale).coerceIn(1f, (web.width - 1).toFloat())
+                val y = (yCss.toFloat() * scale).coerceIn(1f, (web.height - 1).toFloat())
+                val downTime = SystemClock.uptimeMillis()
+                val down = MotionEvent.obtain(
+                    downTime, downTime, MotionEvent.ACTION_DOWN, x, y, 0
+                )
+                web.dispatchTouchEvent(down)
+                down.recycle()
+
+                web.postDelayed({
+                    if (!::web.isInitialized) {
+                        return@postDelayed
+                    }
+                    val upTime = SystemClock.uptimeMillis()
+                    val up = MotionEvent.obtain(
+                        downTime, upTime, MotionEvent.ACTION_UP, x, y, 0
+                    )
+                    web.dispatchTouchEvent(up)
+                    up.recycle()
+                    notifyNativeTap(token, true)
+                }, 65L)
+            }
+        }
+    }
+
+    private fun notifyNativeTap(token: String, delivered: Boolean) {
+        if (!::web.isInitialized) return
+        val quotedToken = JSONObject.quote(token)
+        web.evaluateJavascript(
+            "(function(){const m=window.__formFillNativeTapWaiters;" +
+                "const f=m&&m[$quotedToken];if(f){delete m[$quotedToken];f($delivered);}})()",
+            null
+        )
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -58,6 +112,7 @@ class TtdBookingActivity : Activity() {
         web = WebView(this).apply {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
+            addJavascriptInterface(NativeTouchBridge(), "FormFillNativeTouch")
             settings.allowFileAccess = false
             settings.allowContentAccess = false
             webViewClient = object : WebViewClient() {
@@ -210,6 +265,38 @@ class TtdBookingActivity : Activity() {
               };
               const sleep = ms => new Promise(r => setTimeout(r, ms));
               // Include element-center coordinates. The older helper sent all events at (0,0).
+              // Synthetic DOM events are not trusted by all React dropdowns.
+              // Use an Android MotionEvent tap and wait for the native bridge response.
+              const nativeTap = el => new Promise(resolve => {
+                if (!el || !window.FormFillNativeTouch ||
+                    typeof window.FormFillNativeTouch.tapCss !== 'function') {
+                  resolve(false);
+                  return;
+                }
+                const rect = el.getBoundingClientRect();
+                if (!rect.width || !rect.height) { resolve(false); return; }
+                window.__formFillNativeTapWaiters ||= Object.create(null);
+                window.__formFillNativeTapDone = (token, delivered) => {
+                  const pending = window.__formFillNativeTapWaiters;
+                  const finish = pending && pending[token];
+                  if (finish) finish(!!delivered);
+                };
+                const token = 'fftap_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+                let settled = false;
+                const finish = ok => {
+                  if (settled) return;
+                  settled = true;
+                  delete window.__formFillNativeTapWaiters[token];
+                  resolve(!!ok);
+                };
+                window.__formFillNativeTapWaiters[token] = finish;
+                setTimeout(() => finish(false), 1800);
+                window.FormFillNativeTouch.tapCss(
+                  rect.left + rect.width / 2,
+                  rect.top + rect.height / 2,
+                  token
+                );
+              });
               const tapLikeUser = el => {
                 if (!el) return;
                 const rect = el.getBoundingClientRect();
@@ -243,11 +330,13 @@ class TtdBookingActivity : Activity() {
                 const matchesValue = () => {
                   const actual = norm(input.value);
                   return wanted.includes(actual) ||
-                    (kind === 'idType' && (actual.includes('aadhaar') || actual.includes('aadhar')) &&
+                    (kind === 'idType' &&
+                     (actual.includes('aadhaar') || actual.includes('aadhar')) &&
                      wanted.some(w => w.includes('aadhaar') || w.includes('aadhar')));
                 };
                 if (matchesValue()) {
-                  result.ok = true; result.actual = String(input.value || ''); result.reason = 'already-selected';
+                  result.ok = true; result.actual = String(input.value || '');
+                  result.reason = 'already-selected';
                   return result;
                 }
                 const rowFor = el => {
@@ -261,60 +350,74 @@ class TtdBookingActivity : Activity() {
                 };
                 const row = rowFor(input);
                 const findOptions = () => {
-                  const all = [...document.querySelectorAll('li.floatingDropdown_listItem__tU_5x, [role="option"], li')]
-                    .filter(visible).filter(el => wanted.includes(optionLabel(el)));
+                  const all = [...document.querySelectorAll(
+                    'li.floatingDropdown_listItem__tU_5x, [role="option"], li'
+                  )].filter(visible).filter(el => wanted.includes(optionLabel(el)));
                   result.optionCount = all.length;
-                  // Prefer options rendered inside this pilgrim row. If the site portals
-                  // its menu to document.body, choose the matching option nearest this input.
+                  // The popup may be rendered inside the row or portalled elsewhere.
                   const inRow = all.filter(el => row.contains(el));
                   const pool = inRow.length ? inRow : all;
                   const rect = input.getBoundingClientRect();
                   const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
                   return pool.sort((a,b) => {
                     const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
-                    const da = Math.abs(ra.left + ra.width/2 - cx) + Math.abs(ra.top + ra.height/2 - cy);
-                    const db = Math.abs(rb.left + rb.width/2 - cx) + Math.abs(rb.top + rb.height/2 - cy);
+                    const da = Math.abs(ra.left + ra.width/2 - cx) +
+                               Math.abs(ra.top + ra.height/2 - cy);
+                    const db = Math.abs(rb.left + rb.width/2 - cx) +
+                               Math.abs(rb.top + rb.height/2 - cy);
                     return da - db;
                   });
                 };
-                // First trigger the actual custom control. React's onClick handler
-                // is more important here than synthetic pointer events.
-                input.focus();
-                input.click();
-                input.dispatchEvent(new MouseEvent('mousedown', {bubbles:true, cancelable:true, view:window}));
-                await sleep(250);
+
+                // Important: don't tap again if the correct option is already visible;
+                // doing so can close a dropdown that the user has already opened.
                 let options = findOptions();
-                for (let attempt = 0; attempt < 15 && !options.length; attempt++) {
+                let triggerDelivered = false;
+                if (!options.length) {
+                  input.scrollIntoView({block:'nearest', inline:'nearest'});
+                  await sleep(80);
+                  triggerDelivered = await nativeTap(input);
+                  await sleep(280);
+                  options = findOptions();
+                }
+                if (!options.length) {
+                  // Fallback for WebView/device combinations that refuse touch injection.
+                  tapLikeUser(input);
+                  await sleep(300);
+                  options = findOptions();
+                }
+                for (let attempt = 0; attempt < 12 && !options.length; attempt++) {
                   await sleep(100);
                   options = findOptions();
                 }
                 if (!options.length) {
-                  // Some dropdowns open on pointer/mouse down rather than click.
-                  tapLikeUser(input);
-                  await sleep(250);
-                  options = findOptions();
-                }
-                if (!options.length) {
-                  result.reason = 'dropdown-triggered-but-no-visible-matching-li';
+                  result.reason = triggerDelivered
+                    ? 'android-tap-delivered-but-dropdown-options-not-rendered'
+                    : 'dropdown-did-not-open-after-native-and-dom-taps';
                   result.actual = String(input.value || '');
                   return result;
                 }
-                for (const option of options.slice(0, 3)) {
-                  // Use the DOM click so the framework's delegated click handler
-                  // receives the event from the actual option node.
-                  option.scrollIntoView({block:'nearest', inline:'nearest'});
+
+                const option = options[0];
+                option.scrollIntoView({block:'nearest', inline:'nearest'});
+                await sleep(80);
+                const optionTapDelivered = await nativeTap(option);
+                await sleep(300);
+                result.attempts.push({
+                  text:optionLabel(option),
+                  method:optionTapDelivered ? 'android-touch' : 'dom-fallback',
+                  actual:String(input.value || '')
+                });
+                if (!matchesValue()) {
+                  // Last fallback uses the option's own click handler/delegation.
                   option.click();
-                  await sleep(250);
-                  result.attempts.push({text:optionLabel(option), actual:String(input.value || '')});
-                  if (matchesValue()) break;
-                  // If the menu remains open, retry with pointer/mouse sequence.
-                  tapLikeUser(option);
-                  await sleep(200);
-                  if (matchesValue()) break;
+                  await sleep(300);
                 }
                 result.actual = String(input.value || '');
                 result.ok = matchesValue();
-                result.reason = result.ok ? 'selected-and-verified' : 'visible-li-click-did-not-update-input';
+                result.reason = result.ok ? 'selected-and-verified' :
+                  (optionTapDelivered ? 'android-option-tap-did-not-update-input' :
+                   'option-click-did-not-update-input');
                 return result;
               };
               // The Arjitha Seva page repeats pilgrim fields in DOM order. Fill each
