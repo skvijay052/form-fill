@@ -2,12 +2,14 @@ package com.skv.formfill
 
 import android.app.Activity
 import android.graphics.Color
+import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
 import android.view.Gravity
 import android.view.InputDevice
 import android.view.MotionEvent
 import android.view.View
+import android.view.WindowInsets
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
@@ -36,10 +38,15 @@ class TtdBookingActivity : Activity() {
      */
     inner class NativeTouchBridge {
         @JavascriptInterface
+        fun progress(message: String) {
+            runOnUiThread { status.text = message }
+        }
+
+        @JavascriptInterface
         fun autofillDetected() {
             runOnUiThread {
                 val running = SystemClock.uptimeMillis() - fillStartedAt < 60_000L
-                if (!running) fillCurrentPage(dropdownsOnly = true)
+                if (!running) fillCurrentPage(dropdownsOnly = false, auto = true)
             }
         }
 
@@ -128,6 +135,7 @@ class TtdBookingActivity : Activity() {
         )
     }
 
+    @Suppress("DEPRECATION")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.statusBarColor = Color.rgb(92, 45, 145)
@@ -157,6 +165,27 @@ class TtdBookingActivity : Activity() {
         bar.addView(fill, LinearLayout.LayoutParams(0, -2, 1f))
         bar.addView(inspect)
         root.addView(bar)
+        // Android 15 draws the app behind the status bar, which hid the buttons. Push the
+        // purple bar down by the status-bar height (plus a little extra) and keep the page
+        // above the navigation bar / keyboard.
+        val extraTop = (8 * resources.displayMetrics.density).toInt()
+        root.setOnApplyWindowInsetsListener { _, insets ->
+            val top: Int
+            val bottom: Int
+            if (Build.VERSION.SDK_INT >= 30) {
+                val bars = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
+                val ime = insets.getInsets(WindowInsets.Type.ime())
+                top = bars.top
+                bottom = maxOf(bars.bottom, ime.bottom)
+            } else {
+                top = insets.systemWindowInsetTop
+                bottom = insets.systemWindowInsetBottom
+            }
+            bar.setPadding(10, 8 + top + extraTop, 10, 8)
+            root.setPadding(0, 0, 0, bottom)
+            insets
+        }
+        root.requestApplyInsets()
         status = TextView(this).apply {
             text = "Opening official TTD website…"
             textSize = 12f; setTextColor(Color.DKGRAY)
@@ -339,8 +368,8 @@ class TtdBookingActivity : Activity() {
     private var fillStartedAt = -60_000L
     private var autoRun = false
 
-    private fun fillCurrentPage(dropdownsOnly: Boolean = false) {
-        autoRun = dropdownsOnly
+    private fun fillCurrentPage(dropdownsOnly: Boolean = false, auto: Boolean = false) {
+        autoRun = auto
         fillStartedAt = SystemClock.uptimeMillis()
         val profiles = SecureProfileStore.loadPilgrims(this)
         val profile = profiles.firstOrNull() ?: PilgrimProfile()
@@ -351,6 +380,7 @@ class TtdBookingActivity : Activity() {
                 put("idType", p.idType); put("idNumber", p.idNumber)
             }) } })
             put("dropdownsOnly", dropdownsOnly)
+            put("auto", auto)
             put("fullName", profile.fullName)
             put("age", profile.age)
             put("gender", profile.gender)
@@ -401,16 +431,20 @@ class TtdBookingActivity : Activity() {
                 ['postalCode',['pincode','postalcode','zipcode']]
               ];
               let filled = 0;
+              const checks = [];
               const dropdownResults = [];
               const visible = el => !!(el && (el.offsetWidth || el.offsetHeight || el.getClientRects().length));
               const setValue = (el, value) => {
                 if (value == null || value === '' || !el || el.disabled || el.readOnly) return false;
+                // After the autofill suggestion, keep what Android already filled; only fill empty inputs.
+                if (data.auto && String(el.value || '') !== '') return false;
                 const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype :
                               el instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
                 const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
                 if (setter) setter.call(el, value); else el.value = value;
                 el.dispatchEvent(new Event('input', {bubbles:true}));
                 el.dispatchEvent(new Event('change', {bubbles:true}));
+                checks.push([el, value]);
                 return true;
               };
               const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -683,63 +717,7 @@ class TtdBookingActivity : Activity() {
               // The Arjitha Seva page repeats pilgrim fields in DOM order. Fill each
               // saved profile against the same-index controls; never copy profile 1
               // into every pilgrim row.
-              // Android Autofill is started from a focused input, so the keyboard is open and the
-              // page is resized. Blur it and let the layout settle before measuring anything.
-              try { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); } catch (_) {}
-              await sleep(data.dropdownsOnly ? 1300 : 300);
-              const saved = Array.isArray(data.pilgrims) ? data.pilgrims : [];
-              const names = [...document.querySelectorAll('input[name="name"], input[name="fname"]')].filter(visible);
-              const ages = [...document.querySelectorAll('input[name="age"]')].filter(visible);
-              const genders = [...document.querySelectorAll('input[name="gender"]')].filter(visible);
-              const idTypes = [...document.querySelectorAll('input[name="idType"], input[name="photoIdType"]')].filter(visible);
-              const idNumbers = [...document.querySelectorAll('input[name="idNumber"], input[name="idProofNumber"]')].filter(visible);
-              const rowCount = Math.min(
-                saved.length,
-                Math.max(names.length, ages.length, genders.length, idTypes.length, idNumbers.length)
-              );
-              for (let i = 0; i < rowCount; i++) {
-                const p = saved[i] || {};
-                if (!data.dropdownsOnly && names[i] && setValue(names[i], p.fullName)) filled++;
-                if (!data.dropdownsOnly && ages[i] && setValue(ages[i], p.age)) filled++;
-                const genderResult = await chooseCustom(genders[i], p.gender, 'gender');
-                await sleep(700); // let the Gender list finish closing before touching Photo ID
-                const idTypeResult = await chooseCustom(idTypes[i], p.idType, 'idType');
-                dropdownResults.push({
-                  row:i + 1, gender:genderResult, photoId:idTypeResult,
-                  idNumberReady:!!idNumbers[i] && !idNumbers[i].disabled
-                });
-                if (genderResult.ok) filled++;
-                if (idTypeResult.ok) filled++;
-                if (idNumbers[i]) {
-                  for (let wait = 0; wait < 12 && idNumbers[i].disabled; wait++) await sleep(150);
-                  if (setValue(idNumbers[i], p.idNumber)) filled++;
-                }
-              }
-              for (let pass = 0; pass < 2; pass++) {
-                const bad = dropdownResults.filter(r => !r.gender.ok || !r.photoId.ok);
-                if (!bad.length) break;
-                await sleep(900);
-                const g2 = [...document.querySelectorAll('input[name="gender"]')].filter(visible);
-                const t2 = [...document.querySelectorAll('input[name="idType"], input[name="photoIdType"]')].filter(visible);
-                const n2 = [...document.querySelectorAll('input[name="idNumber"], input[name="idProofNumber"]')].filter(visible);
-                for (const r of bad) {
-                  const i = r.row - 1, p = saved[i] || {};
-                  if (!r.gender.ok) {
-                    r.gender = await chooseCustom(g2[i], p.gender, 'gender');
-                    if (r.gender.ok) filled++;
-                    await sleep(700);
-                  }
-                  if (!r.photoId.ok) {
-                    r.photoId = await chooseCustom(t2[i], p.idType, 'idType');
-                    if (r.photoId.ok) filled++;
-                  }
-                  if (n2[i]) {
-                    for (let wait = 0; wait < 12 && n2[i].disabled; wait++) await sleep(150);
-                    r.idNumberReady = !n2[i].disabled;
-                    if (r.photoId.ok && setValue(n2[i], p.idNumber)) filled++;
-                  }
-                }
-              }
+              // 1) Text fields first: they are instant, so the user sees them fill immediately.
               for (const [key, aliases] of fields) {
                 if (data.dropdownsOnly) break;
                 if (['fullName','age','gender','idType','idNumber'].includes(key)) continue;
@@ -784,15 +762,89 @@ class TtdBookingActivity : Activity() {
                   if (option) { option.click(); filled++; }
                 }
               }
+              // Android Autofill is started from a focused input, so the keyboard is open and the
+              // page is resized. Blur it and let the layout settle before measuring anything.
+              try { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); } catch (_) {}
+              await sleep((data.dropdownsOnly || data.auto) ? 1300 : 300);
+              const saved = Array.isArray(data.pilgrims) ? data.pilgrims : [];
+              const names = [...document.querySelectorAll('input[name="name"], input[name="fname"]')].filter(visible);
+              const ages = [...document.querySelectorAll('input[name="age"]')].filter(visible);
+              const genders = [...document.querySelectorAll('input[name="gender"]')].filter(visible);
+              const idTypes = [...document.querySelectorAll('input[name="idType"], input[name="photoIdType"]')].filter(visible);
+              const idNumbers = [...document.querySelectorAll('input[name="idNumber"], input[name="idProofNumber"]')].filter(visible);
+              const rowCount = Math.min(
+                saved.length,
+                Math.max(names.length, ages.length, genders.length, idTypes.length, idNumbers.length)
+              );
+              for (let i = 0; i < rowCount; i++) {
+                const p = saved[i] || {};
+                if (!data.dropdownsOnly && names[i] && setValue(names[i], p.fullName)) filled++;
+                if (!data.dropdownsOnly && ages[i] && setValue(ages[i], p.age)) filled++;
+              }
+              try {
+                if (window.FormFillNativeTouch && window.FormFillNativeTouch.progress) {
+                  window.FormFillNativeTouch.progress('Text fields filled. Selecting dropdowns, please wait...');
+                }
+              } catch (_) {}
+              // 2) Dropdowns last (slow: real taps).
+              for (let i = 0; i < rowCount; i++) {
+                const p = saved[i] || {};
+                const genderResult = await chooseCustom(genders[i], p.gender, 'gender');
+                await sleep(700); // let the Gender list finish closing before touching Photo ID
+                const idTypeResult = await chooseCustom(idTypes[i], p.idType, 'idType');
+                dropdownResults.push({
+                  row:i + 1, gender:genderResult, photoId:idTypeResult,
+                  idNumberReady:!!idNumbers[i] && !idNumbers[i].disabled
+                });
+                if (genderResult.ok) filled++;
+                if (idTypeResult.ok) filled++;
+                if (idNumbers[i]) {
+                  for (let wait = 0; wait < 12 && idNumbers[i].disabled; wait++) await sleep(150);
+                  if (setValue(idNumbers[i], p.idNumber)) filled++;
+                }
+              }
+              for (let pass = 0; pass < 2; pass++) {
+                const bad = dropdownResults.filter(r => !r.gender.ok || !r.photoId.ok);
+                if (!bad.length) break;
+                await sleep(900);
+                const g2 = [...document.querySelectorAll('input[name="gender"]')].filter(visible);
+                const t2 = [...document.querySelectorAll('input[name="idType"], input[name="photoIdType"]')].filter(visible);
+                const n2 = [...document.querySelectorAll('input[name="idNumber"], input[name="idProofNumber"]')].filter(visible);
+                for (const r of bad) {
+                  const i = r.row - 1, p = saved[i] || {};
+                  if (!r.gender.ok) {
+                    r.gender = await chooseCustom(g2[i], p.gender, 'gender');
+                    if (r.gender.ok) filled++;
+                    await sleep(700);
+                  }
+                  if (!r.photoId.ok) {
+                    r.photoId = await chooseCustom(t2[i], p.idType, 'idType');
+                    if (r.photoId.ok) filled++;
+                  }
+                  if (n2[i]) {
+                    for (let wait = 0; wait < 12 && n2[i].disabled; wait++) await sleep(150);
+                    r.idNumberReady = !n2[i].disabled;
+                    if (r.photoId.ok && setValue(n2[i], p.idNumber)) filled++;
+                  }
+                }
+              }
+              // 'filled' used to count attempts. Re-read the page and count only values that stuck.
+              await sleep(400);
+              const stuck = c => c[0].isConnected && String(c[0].value) === String(c[1]);
+              const textOk = checks.filter(stuck).length;
+              const textMismatch = checks.filter(c => !stuck(c))
+                .map(c => c[0].getAttribute('name') || c[0].getAttribute('label') || '?');
+              const dropOk = dropdownResults.reduce((n, r) => n + (r.gender.ok ? 1 : 0) + (r.photoId.ok ? 1 : 0), 0);
               window.__ffBusy = false; window.__ffLastFill = Date.now();
-              return JSON.stringify({filled, dropdownResults, rowCount, controls:{gender:genders.length, photoId:idTypes.length}});
+              return JSON.stringify({filled: textOk + dropOk, attempted: filled, textMismatch, dropdownResults, rowCount, controls:{gender:genders.length, photoId:idTypes.length}});
             })().then(r => window.FormFillNativeTouch.fillDone(r))
                 .catch(e => { window.__ffBusy = false; window.__ffLastFill = Date.now();
                               window.FormFillNativeTouch.fillDone(JSON.stringify({error:String(e)})); })
         """.trimIndent()
         (getSystemService(INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager)
             ?.hideSoftInputFromWindow(web.windowToken, 0)
-        status.text = if (dropdownsOnly) "Autofill detected, selecting dropdowns…" else "Checking visible TTD form fields…"
+        if (auto) web.clearFocus()
+        status.text = if (auto) "Autofill detected, selecting dropdowns…" else "Checking visible TTD form fields…"
         web.evaluateJavascript(js, null)
     }
 
@@ -810,7 +862,7 @@ class TtdBookingActivity : Activity() {
             if (report != null) {
                 val count = report.optInt("filled", 0)
                 val rows = report.optJSONArray("dropdownResults")
-                val lines = mutableListOf("Filled $count field(s).", "Review all details before continuing.")
+                val lines = mutableListOf("Confirmed on the page: $count field(s) (attempted ${report.optInt("attempted", count)}).", "Review all details before continuing.")
                 if (rows == null || rows.length() == 0) {
                     lines.add("No pilgrim rows detected. Open the pilgrim form and retry.")
                 } else {
@@ -836,7 +888,9 @@ class TtdBookingActivity : Activity() {
                         }
                     }
                 }
-                val allOk = rows != null && rows.length() > 0 && (0 until rows.length()).all { idx ->
+                val bad = report.optJSONArray("textMismatch")
+                if (bad != null && bad.length() > 0) lines.add("Text fields that did not stick: $bad")
+                val allOk = (bad == null || bad.length() == 0) && rows != null && rows.length() > 0 && (0 until rows.length()).all { idx ->
                     val r = rows.optJSONObject(idx)
                     r != null &&
                         r.optJSONObject("gender")?.optBoolean("ok") == true &&
@@ -848,7 +902,7 @@ class TtdBookingActivity : Activity() {
                     return
                 }
                 val summary = lines.joinToString("\n")
-                status.text = "Filled $count field(s). Review dropdown status below."
+                status.text = "Confirmed $count field(s). Review dropdown status below."
                 android.app.AlertDialog.Builder(this)
                     .setTitle("TTD fill report")
                     .setMessage(summary)
