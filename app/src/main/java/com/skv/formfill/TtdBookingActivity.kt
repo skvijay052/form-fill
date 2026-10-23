@@ -444,12 +444,30 @@ class TtdBookingActivity : Activity() {
                 const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
                 // React-controlled inputs track value changes. Use the native setter and
                 // reset React's tracker to the previous value so its onChange sees the edit.
-                if (setter) setter.call(el, String(value)); else el.value = String(value);
+                // Focus first so React and form libraries observe an active field.
+                try { el.focus({preventScroll:true}); } catch (_) { try { el.focus(); } catch (_) {} }
+                // React's value tracker must retain the previous DOM value before input fires.
                 try { if (el._valueTracker && typeof el._valueTracker.setValue === 'function') el._valueTracker.setValue(oldValue); } catch (_) {}
-                el.dispatchEvent(new Event('input', {bubbles:true, composed:true}));
+                if (setter) setter.call(el, String(value)); else el.value = String(value);
+                // Reset the tracker to the old value after the native setter, then dispatch
+                // bubbling input/change events so React's delegated handler detects the change.
+                try { if (el._valueTracker && typeof el._valueTracker.setValue === 'function') el._valueTracker.setValue(oldValue); } catch (_) {}
+                try { el.dispatchEvent(new InputEvent('input', {bubbles:true, composed:true, inputType:'insertText', data:String(value)})); }
+                catch (_) { el.dispatchEvent(new Event('input', {bubbles:true, composed:true})); }
                 el.dispatchEvent(new Event('change', {bubbles:true, composed:true}));
-                try { el.dispatchEvent(new Event('blur', {bubbles:true})); } catch (_) {}
+                try { el.dispatchEvent(new KeyboardEvent('keyup', {bubbles:true, key:'Unidentified'})); } catch (_) {}
                 checks.push([el, String(value)]);
+                // Some controlled fields restore the old value on the next render; verify
+                // again after React has had a chance to process its state update.
+                setTimeout(() => {
+                  if (!el.isConnected || String(el.value || '') === String(value)) return;
+                  const current = String(el.value || '');
+                  try { if (el._valueTracker && typeof el._valueTracker.setValue === 'function') el._valueTracker.setValue(current); } catch (_) {}
+                  if (setter) setter.call(el, String(value)); else el.value = String(value);
+                  try { if (el._valueTracker && typeof el._valueTracker.setValue === 'function') el._valueTracker.setValue(current); } catch (_) {}
+                  el.dispatchEvent(new Event('input', {bubbles:true, composed:true}));
+                  el.dispatchEvent(new Event('change', {bubbles:true, composed:true}));
+                }, 120);
                 return String(el.value || '') === String(value);
               };
               const sleep = ms => new Promise(r => setTimeout(r, ms));
