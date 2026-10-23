@@ -6,6 +6,9 @@ import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
 import android.view.Gravity
+import android.view.KeyEvent
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.view.InputDevice
 import android.view.MotionEvent
 import android.view.View
@@ -40,6 +43,20 @@ class TtdBookingActivity : Activity() {
         @JavascriptInterface
         fun progress(message: String) {
             runOnUiThread { status.text = message }
+        }
+
+        @JavascriptInterface
+        fun pasteText(value: String, token: String) {
+            runOnUiThread {
+                try {
+                    val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+                    clipboard.setPrimaryClip(ClipData.newPlainText("FormFill", value))
+                    web.requestFocus()
+                    val downOk = web.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_PASTE))
+                    val upOk = web.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_PASTE))
+                    web.postDelayed({ notifyNativeTap(token, downOk || upOk) }, 180L)
+                } catch (_: Exception) { notifyNativeTap(token, false) }
+            }
         }
 
         @JavascriptInterface
@@ -525,6 +542,30 @@ class TtdBookingActivity : Activity() {
                   token
                 );
               });
+              const nativePaste = async (el, value) => {
+                if (!el || !value || !window.FormFillNativeTouch ||
+                    typeof window.FormFillNativeTouch.pasteText !== 'function') return false;
+                const tapped = await nativeTap(el);
+                if (!tapped) return false;
+                await sleep(120);
+                const token = 'ffpaste_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+                const pasted = new Promise(resolve => {
+                  window.__formFillNativeTapWaiters ||= Object.create(null);
+                  let settled = false;
+                  const finish = ok => {
+                    if (settled) return;
+                    settled = true;
+                    delete window.__formFillNativeTapWaiters[token];
+                    resolve(!!ok);
+                  };
+                  window.__formFillNativeTapWaiters[token] = finish;
+                  setTimeout(() => finish(false), 1800);
+                  window.FormFillNativeTouch.pasteText(String(value), token);
+                });
+                await pasted;
+                await sleep(250);
+                return String(el.value || '') === String(value);
+              };
               const tapLikeUser = el => {
                 if (!el) return;
                 const rect = el.getBoundingClientRect();
@@ -848,8 +889,16 @@ class TtdBookingActivity : Activity() {
               for (let i = 0; i < rowCount; i++) {
                 const p = saved[i] || {};
                 if (!data.dropdownsOnly) {
-                  const nameOk = !!names[i] && !!p.fullName && setValue(names[i], p.fullName);
-                  const ageOk = !!ages[i] && !!p.age && setValue(ages[i], p.age);
+                  let nameOk = false;
+                  let ageOk = false;
+                  if (names[i] && p.fullName) {
+                    nameOk = await nativePaste(names[i], p.fullName);
+                    if (!nameOk) nameOk = setValue(names[i], p.fullName);
+                  }
+                  if (ages[i] && p.age) {
+                    ageOk = await nativePaste(ages[i], p.age);
+                    if (!ageOk) ageOk = setValue(ages[i], p.age);
+                  }
                   if (nameOk) filled++;
                   if (ageOk) filled++;
                   textFieldResults.push({
