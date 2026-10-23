@@ -914,7 +914,18 @@ class TtdBookingActivity : Activity() {
             if (report != null) {
                 val count = report.optInt("filled", 0)
                 val rows = report.optJSONArray("dropdownResults")
+                val textRows = report.optJSONArray("textFieldResults")
                 val lines = mutableListOf("Confirmed on the page: $count field(s) (attempted ${report.optInt("attempted", count)}).", "Review all details before continuing.")
+                if (textRows != null) {
+                    for (i in 0 until textRows.length()) {
+                        val tr = textRows.optJSONObject(i) ?: continue
+                        val n = tr.optJSONObject("name")
+                        val a = tr.optJSONObject("age")
+                        lines.add("Row ${tr.optInt("row")}: Name " + (if (n?.optBoolean("ok") == true) "OK" else "NOT FILLED") + "; Age " + (if (a?.optBoolean("ok") == true) "OK" else "NOT FILLED") + ".")
+                        if (n?.optBoolean("ok") != true) lines.add("  Name input found=${n?.optBoolean("found")}, saved=${n?.optBoolean("saved")}, actual='${n?.optString("actual")}', expected='${n?.optString("expected")}'.")
+                        if (a?.optBoolean("ok") != true) lines.add("  Age input found=${a?.optBoolean("found")}, saved=${a?.optBoolean("saved")}, actual='${a?.optString("actual")}', expected='${a?.optString("expected")}'.")
+                    }
+                }
                 if (rows == null || rows.length() == 0) {
                     lines.add("No pilgrim rows detected. Open the pilgrim form and retry.")
                 } else {
