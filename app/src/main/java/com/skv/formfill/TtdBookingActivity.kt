@@ -5,6 +5,7 @@ import android.graphics.Color
 import android.os.Bundle
 import android.os.SystemClock
 import android.view.Gravity
+import android.view.InputDevice
 import android.view.MotionEvent
 import android.view.View
 import android.webkit.JavascriptInterface
@@ -42,8 +43,8 @@ class TtdBookingActivity : Activity() {
                 val x = (xCss.toFloat() * scale).coerceIn(1f, (web.width - 1).toFloat())
                 val y = (yCss.toFloat() * scale).coerceIn(1f, (web.height - 1).toFloat())
                 val downTime = SystemClock.uptimeMillis()
-                val down = MotionEvent.obtain(
-                    downTime, downTime, MotionEvent.ACTION_DOWN, x, y, 0
+                val down = createFingerTouchEvent(
+                    downTime, downTime, MotionEvent.ACTION_DOWN, x, y
                 )
                 web.dispatchTouchEvent(down)
                 down.recycle()
@@ -53,8 +54,8 @@ class TtdBookingActivity : Activity() {
                         return@postDelayed
                     }
                     val upTime = SystemClock.uptimeMillis()
-                    val up = MotionEvent.obtain(
-                        downTime, upTime, MotionEvent.ACTION_UP, x, y, 0
+                    val up = createFingerTouchEvent(
+                        downTime, upTime, MotionEvent.ACTION_UP, x, y
                     )
                     web.dispatchTouchEvent(up)
                     up.recycle()
@@ -62,6 +63,43 @@ class TtdBookingActivity : Activity() {
                 }, 65L)
             }
         }
+    }
+
+    private fun createFingerTouchEvent(
+        downTime: Long,
+        eventTime: Long,
+        action: Int,
+        x: Float,
+        y: Float
+    ): MotionEvent {
+        val properties = MotionEvent.PointerProperties().apply {
+            id = 0
+            toolType = MotionEvent.TOOL_TYPE_FINGER
+        }
+        val coordinates = MotionEvent.PointerCoords().apply {
+            this.x = x
+            this.y = y
+            pressure = 1f
+            size = 1f
+            touchMajor = 1f
+            touchMinor = 1f
+        }
+        return MotionEvent.obtain(
+            downTime,
+            eventTime,
+            action,
+            1,
+            arrayOf(properties),
+            arrayOf(coordinates),
+            0,
+            0,
+            1f,
+            1f,
+            0,
+            0,
+            InputDevice.SOURCE_TOUCHSCREEN,
+            0
+        )
     }
 
     private fun notifyNativeTap(token: String, delivered: Boolean) {
