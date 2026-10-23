@@ -183,6 +183,32 @@ class TtdBookingActivity : Activity() {
             (function() {
               const visible = el => !!(el && (el.offsetWidth || el.offsetHeight || el.getClientRects().length));
               const text = el => (el.innerText || el.textContent || '').trim().replace(/\\s+/g,' ').slice(0,100);
+              // Install a short-lived capture trace so the next real manual tap can
+              // reveal whether WebView delivers pointer/mouse/touch events to TTD.
+              const genderTraceKey = '__formFillGenderTapTrace';
+              if (!window[genderTraceKey]) {
+                window[genderTraceKey] = [];
+                const record = ev => {
+                  const target = ev.target;
+                  const gender = target?.closest?.('input[name="gender"]');
+                  const trace = window[genderTraceKey];
+                  if (!trace || trace.length >= 40) return;
+                  trace.push({
+                    type:ev.type,
+                    targetTag:target?.tagName || '',
+                    targetName:target?.getAttribute?.('name') || '',
+                    targetClass:typeof target?.className === 'string' ? target.className.slice(0,100) : '',
+                    onGender:!!gender,
+                    trusted:!!ev.isTrusted,
+                    x:typeof ev.clientX === 'number' ? Math.round(ev.clientX) : null,
+                    y:typeof ev.clientY === 'number' ? Math.round(ev.clientY) : null,
+                    time:Date.now()
+                  });
+                };
+                for (const type of ['touchstart','touchend','pointerdown','pointerup','mousedown','mouseup','click','focus','input','change']) {
+                  document.addEventListener(type, record, true);
+                }
+              }
               const nodes = [...document.querySelectorAll('input,textarea,select,button,[role], [aria-haspopup], [data-testid]')].filter(visible);
               return JSON.stringify({
                 url: location.href,
@@ -203,6 +229,7 @@ class TtdBookingActivity : Activity() {
                   outerHTML: (el.outerHTML || '').slice(0,500),
                   options: el.tagName === 'SELECT' ? [...el.options].map(o => text(o)).slice(0,30) : []
                 })),
+                genderTapTrace: (window.__formFillGenderTapTrace || []).slice(-40),
                 tapTargets: ['gender','idType'].map(name => {
                   const el = document.querySelector('input[name="' + name + '"]');
                   if (!el) return {name, found:false};
