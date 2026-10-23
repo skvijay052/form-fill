@@ -60,6 +60,11 @@ class TtdBookingActivity : Activity() {
                 }, 65L)
             }
         }
+
+        @JavascriptInterface
+        fun fillDone(json: String) {
+            runOnUiThread { showFillReport(json) }
+        }
     }
 
     private fun createFingerTouchEvent(
@@ -484,8 +489,19 @@ class TtdBookingActivity : Activity() {
                 let options = findOptions();
                 let triggerDelivered = false;
                 if (!options.length) {
-                  input.scrollIntoView({block:'nearest', inline:'nearest'});
-                  await sleep(80);
+                  input.scrollIntoView({block:'center', inline:'nearest', behavior:'instant'});
+                  await sleep(400);
+                  const inputRect = input.getBoundingClientRect();
+                  const hit = document.elementFromPoint(
+                    inputRect.left + inputRect.width / 2,
+                    inputRect.top + inputRect.height / 2
+                  );
+                  result.tapHit = hit
+                    ? hit.tagName + '.' + (typeof hit.className === 'string' ? hit.className.slice(0,60) : '')
+                    : 'none-offscreen';
+                  result.tapOnControl = !!hit && (
+                    hit === input || input.contains(hit) || hit.contains(input)
+                  );
                   triggerDelivered = await nativeTap(input);
                   await sleep(280);
                   options = findOptions();
@@ -501,9 +517,15 @@ class TtdBookingActivity : Activity() {
                   options = findOptions();
                 }
                 if (!options.length) {
-                  reactInvoke(input, ['onPointerDown','onMouseDown','onFocus','onClick']);
-                  await sleep(350);
-                  options = findOptions();
+                  for (const h of ['onFocus','onPointerDown','onMouseDown','onClick']) {
+                    const handlersCalled = reactInvoke(input, [h]);
+                    if (handlersCalled > 0) {
+                      await sleep(350);
+                      options = findOptions();
+                      result.reactOpened = h;
+                      if (options.length > 0) break;
+                    }
+                  }
                 }
                 if (!options.length) {
                   result.reason = triggerDelivered
@@ -515,7 +537,7 @@ class TtdBookingActivity : Activity() {
                 }
 
                 const option = options[0];
-                option.scrollIntoView({block:'nearest', inline:'nearest'});
+                option.scrollIntoView({block:'nearest', inline:'nearest', behavior:'instant'});
                 await sleep(80);
                 const optionTapDelivered = await nativeTap(option);
                 await sleep(300);
@@ -646,50 +668,58 @@ class TtdBookingActivity : Activity() {
                 }
               }
               return JSON.stringify({filled, dropdownResults, rowCount, controls:{gender:genders.length, photoId:idTypes.length}});
-            })()
+            })().then(r => window.FormFillNativeTouch.fillDone(r))
+              .catch(e => window.FormFillNativeTouch.fillDone(JSON.stringify({error:String(e)})))
         """.trimIndent()
         status.text = "Checking visible TTD form fields…"
-        web.evaluateJavascript(js) { result ->
-            val decoded = try {
-                org.json.JSONTokener(result ?: "null").nextValue().toString()
-            } catch (_: Exception) { "" }
-            val report = try { JSONObject(decoded) } catch (_: Exception) { null }
-            if (report != null) {
-                val count = report.optInt("filled", 0)
-                val rows = report.optJSONArray("dropdownResults")
-                val lines = mutableListOf("Filled $count field(s).", "Review all details before continuing.")
-                if (rows == null || rows.length() == 0) {
-                    lines.add("No pilgrim rows detected. Open the pilgrim form and retry.")
-                } else {
-                    for (i in 0 until rows.length()) {
-                        val row = rows.optJSONObject(i) ?: continue
-                        val gender = row.optJSONObject("gender")
-                        val photo = row.optJSONObject("photoId")
-                        val genderStatus = if (gender?.optBoolean("ok") == true) "OK" else "NOT SELECTED"
-                        val photoStatus = if (photo?.optBoolean("ok") == true) "OK" else "NOT SELECTED"
-                        val idReady = if (row.optBoolean("idNumberReady")) "ready" else "still disabled"
-                        lines.add("Row ${row.optInt("row")}: Gender $genderStatus; Photo ID $photoStatus; ID number $idReady.")
-                        if (gender?.optBoolean("ok") != true) {
-                            lines.add("  Gender detail: ${gender?.optString("reason", "unknown") ?: "unknown"}")
-                            lines.add("  Visible list items: ${gender?.optJSONArray("seen")?.toString() ?: "[]"}")
-                        }
-                        if (photo?.optBoolean("ok") != true) {
-                            lines.add("  Photo ID detail: ${photo?.optString("reason", "unknown") ?: "unknown"}")
-                            lines.add("  Visible list items: ${photo?.optJSONArray("seen")?.toString() ?: "[]"}")
-                        }
+        web.evaluateJavascript(js, null)
+    }
+
+    private fun showFillReport(decoded: String) {
+        val report = try { JSONObject(decoded) } catch (_: Exception) { null }
+        if (report?.has("error") == true) {
+            val message = report.optString("error", "Unknown error")
+            status.text = "Fill failed: $message"
+            Toast.makeText(this, "Fill failed: $message", Toast.LENGTH_LONG).show()
+            return
+        }
+        if (report != null) {
+            val count = report.optInt("filled", 0)
+            val rows = report.optJSONArray("dropdownResults")
+            val lines = mutableListOf("Filled $count field(s).", "Review all details before continuing.")
+            if (rows == null || rows.length() == 0) {
+                lines.add("No pilgrim rows detected. Open the pilgrim form and retry.")
+            } else {
+                for (i in 0 until rows.length()) {
+                    val row = rows.optJSONObject(i) ?: continue
+                    val gender = row.optJSONObject("gender")
+                    val photo = row.optJSONObject("photoId")
+                    val genderStatus = if (gender?.optBoolean("ok") == true) "OK" else "NOT SELECTED"
+                    val photoStatus = if (photo?.optBoolean("ok") == true) "OK" else "NOT SELECTED"
+                    val idReady = if (row.optBoolean("idNumberReady")) "ready" else "still disabled"
+                    lines.add("Row ${row.optInt("row")}: Gender $genderStatus; Photo ID $photoStatus; ID number $idReady.")
+                    if (gender?.optBoolean("ok") != true) {
+                        lines.add("  Gender detail: ${gender?.optString("reason", "unknown") ?: "unknown"}")
+                        lines.add("  Visible list items: ${gender?.optJSONArray("seen")?.toString() ?: "[]"}")
+                        lines.add("  Tap hit: ${gender?.optString("tapHit", "-") ?: "-"} (on control: ${gender?.optBoolean("tapOnControl") == true}, react: ${gender?.optString("reactOpened", "-") ?: "-"})")
+                    }
+                    if (photo?.optBoolean("ok") != true) {
+                        lines.add("  Photo ID detail: ${photo?.optString("reason", "unknown") ?: "unknown"}")
+                        lines.add("  Visible list items: ${photo?.optJSONArray("seen")?.toString() ?: "[]"}")
+                        lines.add("  Tap hit: ${photo?.optString("tapHit", "-") ?: "-"} (on control: ${photo?.optBoolean("tapOnControl") == true}, react: ${photo?.optString("reactOpened", "-") ?: "-"})")
                     }
                 }
-                val summary = lines.joinToString("\n")
-                status.text = "Filled $count field(s). Review dropdown status below."
-                android.app.AlertDialog.Builder(this)
-                    .setTitle("TTD fill report")
-                    .setMessage(summary)
-                    .setPositiveButton("OK", null)
-                    .show()
-            } else {
-                status.text = "Fill attempt finished. Check the form and correct any fields manually."
-                Toast.makeText(this, "Please review the form; custom controls may need manual selection.", Toast.LENGTH_LONG).show()
             }
+            val summary = lines.joinToString("\\n")
+            status.text = "Filled $count field(s). Review dropdown status below."
+            android.app.AlertDialog.Builder(this)
+                .setTitle("TTD fill report")
+                .setMessage(summary)
+                .setPositiveButton("OK", null)
+                .show()
+        } else {
+            status.text = "Fill attempt finished. Check the form and correct any fields manually."
+            Toast.makeText(this, "Please review the form; custom controls may need manual selection.", Toast.LENGTH_LONG).show()
         }
     }
 
