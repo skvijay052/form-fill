@@ -573,7 +573,7 @@ class TtdBookingActivity : Activity() {
               };
               const seenOptions = () => [...document.querySelectorAll('li,[role="option"]')]
                 .filter(visible).map(optionLabel).filter(Boolean).slice(0, 12);
-              const chooseCustom = async (input, value, kind) => {
+              const chooseCustom = async (input, value, kind, forceSelection = false) => {
                 const result = {ok:false, field:kind, actual:String(input?.value || ''),
                   reason:'', optionCount:0, attempts:[]};
                 if (!input) { result.reason = 'control-not-found'; return result; }
@@ -586,7 +586,10 @@ class TtdBookingActivity : Activity() {
                      (actual.includes('aadhaar') || actual.includes('aadhar')) &&
                      wanted.some(w => w.includes('aadhaar') || w.includes('aadhar')));
                 };
-                if (matchesValue()) {
+                // A visible value can be only a UI default, not React's committed
+                // selection. When a dependent field (Photo ID) is still disabled,
+                // re-select Gender even if the input text already says "Male".
+                if (matchesValue() && !forceSelection) {
                   result.ok = true; result.actual = String(input.value || '');
                   result.reason = 'already-selected';
                   return result;
@@ -823,7 +826,7 @@ class TtdBookingActivity : Activity() {
               // 2) Dropdowns last (slow: real taps).
               for (let i = 0; i < rowCount; i++) {
                 const p = saved[i] || {};
-                const genderResult = await chooseCustom(genders[i], p.gender, 'gender');
+                const genderResult = await chooseCustom(genders[i], p.gender, 'gender', !!idTypes[i]?.disabled);
                 await sleep(700); // let the Gender list finish closing before touching Photo ID
                 const idTypeResult = await chooseCustom(idTypes[i], p.idType, 'idType');
                 dropdownResults.push({
