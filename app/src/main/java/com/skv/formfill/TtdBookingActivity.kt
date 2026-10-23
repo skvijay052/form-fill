@@ -25,29 +25,20 @@ class TtdBookingActivity : Activity() {
     private val ttdHost = "ttdevasthanams.ap.gov.in"
 
     /**
-     * Executes a real Android touch on the WebView at a CSS viewport coordinate.
-     * The web page reports coordinates from getBoundingClientRect(); WebView scale
-     * maps those CSS pixels back to the view's physical pixel coordinates.
+     * Executes a real Android touch using normalized WebView viewport coordinates.
      */
     inner class NativeTouchBridge {
         @JavascriptInterface
-        fun tapCss(xCss: Double, yCss: Double, token: String) {
+        fun tapFraction(fx: Double, fy: Double, token: String) {
             runOnUiThread {
                 if (!::web.isInitialized || web.width <= 1 || web.height <= 1 ||
-                    !xCss.isFinite() || !yCss.isFinite()) {
+                    !fx.isFinite() || !fy.isFinite() || fx < 0.0 || fx > 1.0 || fy < 0.0 || fy > 1.0) {
                     notifyNativeTap(token, false)
                     return@runOnUiThread
                 }
 
-                // getBoundingClientRect() reports CSS pixels. Android View touch
-                // coordinates use physical view pixels, so the display density must
-                // be applied in addition to the page zoom factor. Omitting density
-                // makes taps land too far toward the top-left on high-density phones.
-                val density = resources.displayMetrics.density.takeIf { it > 0f } ?: 1f
-                val pageScale = web.scale.takeIf { it > 0f } ?: 1f
-                val cssToViewPixels = density * pageScale
-                val x = (xCss.toFloat() * cssToViewPixels).coerceIn(1f, (web.width - 1).toFloat())
-                val y = (yCss.toFloat() * cssToViewPixels).coerceIn(1f, (web.height - 1).toFloat())
+                val x = (fx * web.width).toFloat().coerceIn(1f, web.width - 1f)
+                val y = (fy * web.height).toFloat().coerceIn(1f, web.height - 1f)
                 val downTime = SystemClock.uptimeMillis()
                 val down = createFingerTouchEvent(
                     downTime, downTime, MotionEvent.ACTION_DOWN, x, y
@@ -360,12 +351,19 @@ class TtdBookingActivity : Activity() {
               // Use an Android MotionEvent tap and wait for the native bridge response.
               const nativeTap = el => new Promise(resolve => {
                 if (!el || !window.FormFillNativeTouch ||
-                    typeof window.FormFillNativeTouch.tapCss !== 'function') {
+                    typeof window.FormFillNativeTouch.tapFraction !== 'function') {
                   resolve(false);
                   return;
                 }
                 const rect = el.getBoundingClientRect();
                 if (!rect.width || !rect.height) { resolve(false); return; }
+                const vv = window.visualViewport;
+                const viewportWidth = vv ? vv.width : window.innerWidth;
+                const viewportHeight = vv ? vv.height : window.innerHeight;
+                const offsetLeft = vv ? vv.offsetLeft : 0;
+                const offsetTop = vv ? vv.offsetTop : 0;
+                const fx = (rect.left + rect.width / 2 - offsetLeft) / viewportWidth;
+                const fy = (rect.top + rect.height / 2 - offsetTop) / viewportHeight;
                 window.__formFillNativeTapWaiters ||= Object.create(null);
                 window.__formFillNativeTapDone = (token, delivered) => {
                   const pending = window.__formFillNativeTapWaiters;
@@ -382,11 +380,7 @@ class TtdBookingActivity : Activity() {
                 };
                 window.__formFillNativeTapWaiters[token] = finish;
                 setTimeout(() => finish(false), 1800);
-                window.FormFillNativeTouch.tapCss(
-                  rect.left + rect.width / 2,
-                  rect.top + rect.height / 2,
-                  token
-                );
+                window.FormFillNativeTouch.tapFraction(fx, fy, token);
               });
               const tapLikeUser = el => {
                 if (!el) return;
@@ -412,6 +406,31 @@ class TtdBookingActivity : Activity() {
                 if (kind === 'gender' && norm(value) === 'f') return ['female'];
                 return [norm(value)];
               };
+              const reactInvoke = (el, names) => {
+                if (!el) return 0;
+                let called = 0;
+                for (let n = el, depth = 0; n && depth <= 4; n = n.parentElement, depth++) {
+                  const key = Object.keys(n).find(k => k.startsWith('__reactProps' + String.fromCharCode(36)));
+                  const props = key ? n[key] : null;
+                  if (!props) continue;
+                  for (const name of names) {
+                    if (typeof props[name] !== 'function') continue;
+                    const event = {
+                      type:name.replace(/^on/, '').toLowerCase(),
+                      target:el, currentTarget:n,
+                      preventDefault(){}, stopPropagation(){}, persist(){},
+                      isTrusted:true, nativeEvent:{}, button:0, detail:1
+                    };
+                    try { props[name](event); called++; } catch (_) {}
+                  }
+                }
+                return called;
+              };
+              const seenOptions = () => [...document.querySelectorAll('li, [role="option"]')]
+                .filter(visible)
+                .map(el => (el.innerText || el.textContent || '').trim().replace(/\\s+/g, ' ').slice(0, 80))
+                .filter(Boolean)
+                .slice(0, 12);
               const chooseCustom = async (input, value, kind) => {
                 const result = {ok:false, field:kind, actual:String(input?.value || ''),
                   reason:'', optionCount:0, attempts:[]};
@@ -482,10 +501,16 @@ class TtdBookingActivity : Activity() {
                   options = findOptions();
                 }
                 if (!options.length) {
+                  reactInvoke(input, ['onPointerDown','onMouseDown','onFocus','onClick']);
+                  await sleep(350);
+                  options = findOptions();
+                }
+                if (!options.length) {
                   result.reason = triggerDelivered
                     ? 'android-tap-delivered-but-dropdown-options-not-rendered'
                     : 'dropdown-did-not-open-after-native-and-dom-taps';
                   result.actual = String(input.value || '');
+                  result.seen = seenOptions();
                   return result;
                 }
 
@@ -524,6 +549,10 @@ class TtdBookingActivity : Activity() {
                   await sleep(250);
                 }
                 if (!matchesValue()) {
+                  reactInvoke(option, ['onPointerDown','onMouseDown','onPointerUp','onMouseUp','onClick']);
+                  await sleep(300);
+                }
+                if (!matchesValue()) {
                   // Last resort for accessible custom comboboxes: use their keyboard
                   // selection path. Never overwrite the input value directly; React
                   // must commit the selected option itself.
@@ -540,6 +569,7 @@ class TtdBookingActivity : Activity() {
                 result.reason = result.ok ? 'selected-and-verified' :
                   (optionTapDelivered ? 'android-option-tap-did-not-update-input' :
                    'option-click-did-not-update-input');
+                if (!result.ok) result.seen = seenOptions();
                 return result;
               };
               // The Arjitha Seva page repeats pilgrim fields in DOM order. Fill each
@@ -641,9 +671,11 @@ class TtdBookingActivity : Activity() {
                         lines.add("Row ${row.optInt("row")}: Gender $genderStatus; Photo ID $photoStatus; ID number $idReady.")
                         if (gender?.optBoolean("ok") != true) {
                             lines.add("  Gender detail: ${gender?.optString("reason", "unknown") ?: "unknown"}")
+                            lines.add("  Visible list items: ${gender?.optJSONArray("seen")?.toString() ?: "[]"}")
                         }
                         if (photo?.optBoolean("ok") != true) {
                             lines.add("  Photo ID detail: ${photo?.optString("reason", "unknown") ?: "unknown"}")
+                            lines.add("  Visible list items: ${photo?.optJSONArray("seen")?.toString() ?: "[]"}")
                         }
                     }
                 }
