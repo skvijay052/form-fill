@@ -511,7 +511,23 @@ class TtdBookingActivity : Activity() {
                 el.dispatchEvent(new MouseEvent('mouseup', {...opts, buttons:0}));
                 el.dispatchEvent(new MouseEvent('click', {...opts, buttons:0, detail:1}));
               };
-              const optionLabel = el => norm(el?.innerText || el?.textContent || el?.getAttribute?.('aria-label') || '');
+              // TTD's custom list items sometimes contain nested labels/duplicate text
+              // (for example a LI plus a child span). Compare the shortest visible text
+              // line and accessible labels instead of requiring the entire LI text to match.
+              const optionLabel = el => {
+                if (!el) return '';
+                const attrs = [el.getAttribute?.('aria-label'), el.getAttribute?.('data-value'),
+                               el.getAttribute?.('title')].filter(Boolean);
+                const lines = String(el.innerText || el.textContent || '')
+                  .split(/\\n+/).map(s => s.trim()).filter(Boolean);
+                const text = lines.sort((a,b) => a.length - b.length)[0] || '';
+                return norm(attrs[0] || text || el.textContent || '');
+              };
+              const optionMatchesWanted = (el, wanted) => {
+                const label = optionLabel(el);
+                if (!label) return false;
+                return wanted.some(w => label === w || label.includes(w) || w.includes(label));
+              };
               const wantedLabels = (value, kind) => {
                 if (kind === 'idType' && norm(value).includes('aadhaar')) return ['aadhaarcard','aadhaar','aadharcard','aadhar'];
                 if (kind === 'gender' && norm(value) === 'm') return ['male'];
@@ -586,9 +602,9 @@ class TtdBookingActivity : Activity() {
                 };
                 const row = rowFor(input);
                 const findOptions = () => {
-                  const all = [...document.querySelectorAll(
-                    'li.floatingDropdown_listItem__tU_5x, [role="option"], li'
-                  )].filter(visible).filter(el => wanted.includes(optionLabel(el)));
+                  const all = [...new Set(document.querySelectorAll(
+                    'li.floatingDropdown_listItem__tU_5x, [role="option"], li, [data-value]'
+                  ))].filter(visible).filter(el => optionMatchesWanted(el, wanted));
                   result.optionCount = all.length;
                   // The popup may be rendered inside the row or portalled elsewhere.
                   const inRow = all.filter(el => row.contains(el));
@@ -655,9 +671,19 @@ class TtdBookingActivity : Activity() {
                   return result;
                 }
 
+                // Prefer the most specific matching option, not a broad parent that
+                // happens to contain the same label. This avoids choosing the wrong row
+                // when the TTD page renders nested/duplicated option text.
+                options.sort((a,b) => {
+                  const score = el => {
+                    const label = optionLabel(el);
+                    return wanted.includes(label) ? 0 : 1;
+                  };
+                  return score(a) - score(b);
+                });
                 const option = options[0];
                 option.scrollIntoView({block:'nearest', inline:'nearest', behavior:'instant'});
-                await sleep(80);
+                await sleep(120);
                 const optionTapDelivered = await nativeTap(option);
                 await sleep(300);
                 result.attempts.push({
@@ -669,9 +695,17 @@ class TtdBookingActivity : Activity() {
                   // Some React dropdowns listen on a nested element or on pointer/mouse
                   // events rather than the LI itself. Try the deepest visible text node
                   // target first, then a complete DOM pointer/mouse sequence.
-                  const clickable = option.querySelector('button,[role="option"],span,div') || option;
+                  const children = [...option.querySelectorAll('button,[role="option"],span,div')]
+                    .filter(visible)
+                    .filter(el => optionMatchesWanted(el, wanted));
+                  const clickable = children.sort((a,b) => {
+                    const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+                    return (ra.width * ra.height) - (rb.width * rb.height);
+                  })[0] || option;
                   try { clickable.click(); } catch (_) {}
-                  await sleep(180);
+                  // Some React handlers live on the child label rather than the LI.
+                  if (!matchesValue()) reactInvoke(clickable, ['onPointerDown','onMouseDown','onClick']);
+                  await sleep(250);
                 }
                 if (!matchesValue()) {
                   const rect = option.getBoundingClientRect();
