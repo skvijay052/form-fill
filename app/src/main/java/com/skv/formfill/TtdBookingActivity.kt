@@ -29,7 +29,7 @@ class TtdBookingActivity : Activity() {
      * The web page reports coordinates from getBoundingClientRect(); WebView scale
      * maps those CSS pixels back to the view's physical pixel coordinates.
      */
-    private inner class NativeTouchBridge {
+    inner class NativeTouchBridge {
         @JavascriptInterface
         fun tapCss(xCss: Double, yCss: Double, token: String) {
             runOnUiThread {
