@@ -519,7 +519,7 @@ class TtdBookingActivity : Activity() {
                 const attrs = [el.getAttribute?.('aria-label'), el.getAttribute?.('data-value'),
                                el.getAttribute?.('title')].filter(Boolean);
                 const lines = String(el.innerText || el.textContent || '')
-                  .split(/\\n+/).map(s => s.trim()).filter(Boolean);
+                  .split(/\n+/).map(s => s.trim()).filter(Boolean);
                 const text = lines.sort((a,b) => a.length - b.length)[0] || '';
                 return norm(attrs[0] || text || el.textContent || '');
               };
