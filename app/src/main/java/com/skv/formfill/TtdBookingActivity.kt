@@ -203,6 +203,26 @@ class TtdBookingActivity : Activity() {
                   outerHTML: (el.outerHTML || '').slice(0,500),
                   options: el.tagName === 'SELECT' ? [...el.options].map(o => text(o)).slice(0,30) : []
                 })),
+                tapTargets: ['gender','idType'].map(name => {
+                  const el = document.querySelector('input[name="' + name + '"]');
+                  if (!el) return {name, found:false};
+                  const r = el.getBoundingClientRect();
+                  const x = r.left + r.width / 2, y = r.top + r.height / 2;
+                  const hit = document.elementFromPoint(x, y);
+                  const ancestors = [];
+                  for (let n = el, i = 0; n && i < 6; n = n.parentElement, i++) {
+                    const s = getComputedStyle(n);
+                    ancestors.push({tag:n.tagName, className:typeof n.className === 'string' ? n.className.slice(0,100) : '',
+                      pointerEvents:s.pointerEvents, zIndex:s.zIndex, position:s.position,
+                      rect:(() => { const q=n.getBoundingClientRect(); return {x:Math.round(q.x),y:Math.round(q.y),w:Math.round(q.width),h:Math.round(q.height)}; })()});
+                  }
+                  return {name, found:true, value:el.value, disabled:el.disabled, readOnly:el.readOnly,
+                    rect:{x:Math.round(r.x),y:Math.round(r.y),w:Math.round(r.width),h:Math.round(r.height)},
+                    center:{x:Math.round(x),y:Math.round(y)},
+                    hitTag:hit?.tagName || '', hitText:text(hit || document.body),
+                    hitIsField:!!hit && (hit === el || el.contains(hit)),
+                    hitOuterHTML:(hit?.outerHTML || '').slice(0,350), ancestors};
+                }),
                 popupCandidates: [...document.querySelectorAll('body *')].filter(el => {
                   if (!visible(el)) return false;
                   const t = (el.innerText || el.textContent || '').trim().replace(/\\s+/g,' ');
