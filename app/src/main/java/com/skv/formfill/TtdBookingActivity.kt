@@ -51,7 +51,8 @@ class TtdBookingActivity : Activity() {
                 try {
                     val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
                     clipboard.setPrimaryClip(ClipData.newPlainText("FormFill", value))
-                    web.requestFocus()
+                    // Do not call web.requestFocus() here: it can steal focus from the
+                    // DOM input and cause KEYCODE_PASTE to be sent to BODY instead.
                     val downOk = web.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_PASTE))
                     val upOk = web.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_PASTE))
                     web.postDelayed({ notifyNativeTap(token, downOk || upOk) }, 180L)
@@ -552,6 +553,10 @@ class TtdBookingActivity : Activity() {
                 result.attempted = true;
                 try {
                   result.tapped = await nativeTap(el);
+                  // A native touch can miss when the WebView viewport changes during
+                  // scrolling. Explicitly focus the intended DOM input before sending
+                  // Android's clipboard-paste key; the native bridge must not steal focus.
+                  try { el.focus({preventScroll:true}); } catch (_) { try { el.focus(); } catch (_) {} }
                   await sleep(120);
                   result.activeAfterTap = document.activeElement
                     ? (document.activeElement.tagName + '.' + (document.activeElement.getAttribute('name') || '')) : '';
