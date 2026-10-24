@@ -481,7 +481,7 @@ class TtdBookingActivity : Activity() {
                   }
                 } catch (_) {}
                 try { el.dispatchEvent(new KeyboardEvent('keyup', {bubbles:true, key:'Unidentified'})); } catch (_) {}
-                checks.push([el, String(value)]);
+                if (!checks.some(c => c[0] === el)) checks.push([el, String(value)]);
                 // Some controlled fields restore the old value on the next render; verify
                 // again after React has had a chance to process its state update.
                 setTimeout(() => {
@@ -904,20 +904,22 @@ class TtdBookingActivity : Activity() {
                   let ageOk = false;
                   let namePaste = null, agePaste = null;
                   if (names[i] && p.fullName) {
+                    if (!checks.some(c => c[0] === names[i])) checks.push([names[i], String(p.fullName)]);
                     namePaste = await nativePaste(names[i], p.fullName);
                     nameOk = String(names[i].value || '') === String(p.fullName);
                     if (!nameOk) nameOk = setValue(names[i], p.fullName);
                   }
                   if (ages[i] && p.age) {
+                    if (!checks.some(c => c[0] === ages[i])) checks.push([ages[i], String(p.age)]);
                     agePaste = await nativePaste(ages[i], p.age);
                     ageOk = String(ages[i].value || '') === String(p.age);
                     if (!ageOk) ageOk = setValue(ages[i], p.age);
                   }
-                  textFieldResults.push({row:i+1, diagnostic:{namePaste,agePaste}});
                   if (nameOk) filled++;
                   if (ageOk) filled++;
                   textFieldResults.push({
                     row:i + 1,
+                    diagnostic:{namePaste,agePaste},
                     name:{found:!!names[i], saved:!!p.fullName, actual:String(names[i]?.value || ''), expected:String(p.fullName || ''), ok:!!names[i] && String(names[i].value || '') === String(p.fullName || '') && !!p.fullName},
                     age:{found:!!ages[i], saved:!!p.age, actual:String(ages[i]?.value || ''), expected:String(p.age || ''), ok:!!ages[i] && String(ages[i].value || '') === String(p.age || '') && !!p.age}
                   });
@@ -1014,6 +1016,11 @@ class TtdBookingActivity : Activity() {
                         lines.add("Row ${tr.optInt("row")}: Name " + (if (n?.optBoolean("ok") == true) "OK" else "NOT FILLED") + "; Age " + (if (a?.optBoolean("ok") == true) "OK" else "NOT FILLED") + ".")
                         if (n?.optBoolean("ok") != true) lines.add("  Name input found=${n?.optBoolean("found")}, saved=${n?.optBoolean("saved")}, actual='${n?.optString("actual")}', expected='${n?.optString("expected")}'.")
                         if (a?.optBoolean("ok") != true) lines.add("  Age input found=${a?.optBoolean("found")}, saved=${a?.optBoolean("saved")}, actual='${a?.optString("actual")}', expected='${a?.optString("expected")}'.")
+                        val diagnostic = tr.optJSONObject("diagnostic")
+                        listOf("namePaste" to "Name", "agePaste" to "Age").forEach { (key, label) ->
+                            val paste = diagnostic?.optJSONObject(key) ?: return@forEach
+                            lines.add("  $label paste trace: attempted=${paste.optBoolean("attempted")}, tapped=${paste.optBoolean("tapped")}, bridgeCalled=${paste.optBoolean("bridgeCalled")}, bridgeDelivered=${paste.optBoolean("bridgeDelivered")}, immediately='${paste.optString("valueImmediately")}', afterWait='${paste.optString("valueAfterWait")}', active='${paste.optString("activeAfterTap")}', error='${paste.optString("error")}'.")
+                        }
                     }
                 }
                 if (rows == null || rows.length() == 0) {
@@ -1059,7 +1066,12 @@ class TtdBookingActivity : Activity() {
                 android.app.AlertDialog.Builder(this)
                     .setTitle("TTD fill report")
                     .setMessage(summary)
-                    .setPositiveButton("OK", null)
+                    .setPositiveButton("Copy report") { _, _ ->
+                        val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("FormFill TTD fill report", summary))
+                        Toast.makeText(this, "Fill report copied. Paste it into this chat.", Toast.LENGTH_LONG).show()
+                    }
+                    .setNegativeButton("Close", null)
                     .show()
             } else {
                 status.text = "Fill attempt finished. Check the form and correct any fields manually."
